@@ -1,4 +1,3 @@
-
 import os
 import json
 import sqlite3
@@ -9,6 +8,7 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Header
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -165,9 +165,19 @@ class SaveIn(BaseModel):
 
 @app.get("/")
 def root():
+    # فایل index.html باید کنار server.py در مخزن GitHub باشد.
+    html_file = Path(__file__).resolve().parent / "index.html"
+
+    if html_file.is_file():
+        return FileResponse(
+            html_file,
+            media_type="text/html; charset=utf-8"
+        )
+
     return {
         "app": "بازی زندگی",
         "status": "online",
+        "message": "index.html در کنار server.py پیدا نشد.",
         "worlds": 5,
         "capacity_per_world": CAPACITY
     }
@@ -381,4 +391,3 @@ def me(authorization: str | None = Header(default=None)):
             "name": player["name"],
             "state": json.loads(player["state_json"])
 }
-  
