@@ -23,7 +23,7 @@ if DATABASE_URL.startswith("postgres://"):
 
 CAPACITY = 20
 ACTIVE_SECONDS = 45
-SERVER_NAMES = {"1": "تهران", "2": "اصفهان", "3": "بندرعباس", "4": "قشم", "5": "سرور ۵"}
+SERVER_NAMES = {"1": "تهران", "2": "اصفهان", "3": "بندرعباس", "4": "قشم", "5": "اهواز"}
 
 app = FastAPI(title="Zendegi Life Game Server", version="1.3.1")
 CITY_LIMIT = 4800.0
@@ -115,6 +115,15 @@ def init_db():
                 player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
                 server_id TEXT NOT NULL,
                 expires_at BIGINT NOT NULL
+            )
+        """)
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS road_builder_grants (
+                player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL,
+                granted_by BIGINT REFERENCES players(id) ON DELETE SET NULL,
+                granted_at BIGINT NOT NULL,
+                PRIMARY KEY(player_id, server_id)
             )
         """)
         db.execute("""
@@ -358,6 +367,10 @@ class BuilderUnlockIn(BaseModel):
     password: str = Field(default="", max_length=128)
 
 
+class RoadBuilderGrantIn(BaseModel):
+    server_ids: list[str] = Field(min_length=1, max_length=5)
+
+
 class AnnouncementIn(BaseModel):
     message: str = Field(min_length=1, max_length=240)
     duration_minutes: int = Field(ge=1, le=10080)
@@ -410,20 +423,25 @@ def require_builder(db, authorization, builder_token):
 
 
 def require_road_builder(db, authorization, builder_token):
-    """Creator may build anywhere; support2 may build only on server 2."""
+    """Creator, legacy support builders, or creator-approved account on this server."""
     player = current_player(db, authorization)
     name = norm_name(player["name"])
     server_id = str(player["session_server"])
-    allowed = (name == norm_name(CREATOR_NAME) or (name == norm_name("پشتیبانی2") and server_id == "2") or (name == norm_name("پشتیبانی ۳") and server_id == "3"))
-    if not allowed:
+    legacy_allowed = (name == norm_name(CREATOR_NAME) or
+        (name == norm_name("پشتیبانی2") and server_id == "2") or
+        (name == norm_name("پشتیبانی ۳") and server_id == "3"))
+    grant = db.execute(
+        "SELECT 1 FROM road_builder_grants WHERE player_id=? AND server_id=?",
+        (player["id"], server_id)
+    ).fetchone()
+    if not (legacy_allowed or grant):
         raise HTTPException(403, "دسترسی ساخت آسفالت برای این حساب و سرور فعال نیست.")
     if not builder_token:
         raise HTTPException(401, "ابتدا ابزار ساخت را فعال کن.")
-    now = int(time.time())
     row = db.execute(
         """SELECT token FROM builder_sessions
         WHERE token=? AND player_id=? AND server_id=? AND expires_at>=?""",
-        (builder_token, player["id"], server_id, now)
+        (builder_token, player["id"], server_id, int(time.time()))
     ).fetchone()
     if not row:
         raise HTTPException(403, "دسترسی ساخت معتبر نیست؛ دوباره ابزار ساخت را فعال کن.")
@@ -917,7 +935,8 @@ def unlock_builder(data: BuilderUnlockIn, authorization: str | None = Header(def
         server_id = str(player["session_server"])
         is_creator = name == norm_name(CREATOR_NAME)
         is_support_builder = ((name == norm_name("پشتیبانی2") and server_id == "2") or (name == norm_name("پشتیبانی ۳") and server_id == "3"))
-        if not (is_creator or is_support_builder):
+        has_grant = db.execute("SELECT 1 FROM road_builder_grants WHERE player_id=? AND server_id=?", (player["id"], server_id)).fetchone() is not None
+        if not (is_creator or is_support_builder or has_grant):
             raise HTTPException(403, "دسترسی ساخت آسفالت برای این حساب و سرور فعال نیست.")
 
         first_setup = False
@@ -964,6 +983,11 @@ def admin_list_players(
             FROM players ORDER BY created_at DESC, id DESC"""
         ).fetchall()
     result = []
+    with connect() as db:
+        grants = db.execute("SELECT player_id, server_id FROM road_builder_grants").fetchall()
+    grant_map = {}
+    for g in grants:
+        grant_map.setdefault(int(g["player_id"]), []).append(str(g["server_id"]))
     for row in rows:
         try:
             state = json.loads(row["state_json"] or "{}")
@@ -973,12 +997,48 @@ def admin_list_players(
             "id": row["id"], "name": row["name"], "age": row["age"],
             "server_id": row["server_id"], "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "build_servers": grant_map.get(int(row["id"]), []),
             "balance": int(state.get("balance", 0) or 0),
             "xp": int(state.get("xp", 0) or 0),
             "inventory": state.get("inventory") if isinstance(state.get("inventory"), dict) else {},
             "inventory_count": sum(int(v or 0) for v in (state.get("inventory") or {}).values() if isinstance(v, (int, float)))
         })
     return {"players": result}
+
+
+@app.post("/api/admin/players/{player_id}/road-builder-grant")
+def admin_grant_road_builder(
+    player_id: int,
+    data: RoadBuilderGrantIn,
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None)
+):
+    with connect() as db:
+        creator = require_builder(db, authorization, x_builder_token)
+        if not db.execute("SELECT 1 FROM players WHERE id=?", (player_id,)).fetchone():
+            raise HTTPException(404, "این حساب پیدا نشد.")
+        ids = sorted(set(str(x) for x in data.server_ids))
+        if not ids or any(x not in SERVER_NAMES for x in ids):
+            raise HTTPException(400, "سرور انتخاب‌شده معتبر نیست.")
+        for sid in ids:
+            db.execute("""INSERT INTO road_builder_grants(player_id,server_id,granted_by,granted_at)
+                VALUES(?,?,?,?) ON CONFLICT(player_id,server_id) DO NOTHING""",
+                (player_id, sid, creator["id"], int(time.time())))
+    return {"ok": True, "player_id": player_id, "server_ids": ids}
+
+
+@app.post("/api/admin/players/{player_id}/road-builder-revoke")
+def admin_revoke_road_builder(
+    player_id: int,
+    data: RoadBuilderGrantIn,
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None)
+):
+    with connect() as db:
+        require_builder(db, authorization, x_builder_token)
+        for sid in set(str(x) for x in data.server_ids):
+            db.execute("DELETE FROM road_builder_grants WHERE player_id=? AND server_id=?", (player_id, sid))
+    return {"ok": True}
 
 
 @app.post("/api/admin/players/{player_id}/zero-resource")
