@@ -927,6 +927,23 @@ def me(authorization: str | None = Header(default=None)):
 }
   
 
+@app.get("/api/builder/status")
+def builder_status(authorization: str | None = Header(default=None)):
+    """Return whether the signed-in player may use road building on their current server."""
+    with connect() as db:
+        player = current_player(db, authorization)
+        name = norm_name(player["name"])
+        server_id = str(player["session_server"])
+        legacy_allowed = (name == norm_name(CREATOR_NAME) or
+            (name == norm_name("پشتیبانی2") and server_id == "2") or
+            (name == norm_name("پشتیبانی ۳") and server_id == "3"))
+        granted = db.execute(
+            "SELECT 1 FROM road_builder_grants WHERE player_id=? AND server_id=?",
+            (player["id"], server_id)
+        ).fetchone() is not None
+    return {"allowed": bool(legacy_allowed or granted), "server_id": server_id}
+
+
 @app.post("/api/builder/unlock")
 def unlock_builder(data: BuilderUnlockIn, authorization: str | None = Header(default=None)):
     with connect() as db:
