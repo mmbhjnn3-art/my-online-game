@@ -695,7 +695,7 @@ function showGame(){
  $("auth").classList.add("hidden");$("game").classList.remove("hidden");
  resumeGameClock();
  document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
- render();stopTimers();updateBuilderVisibility();refreshRoads();refreshMapMarkers();drawCity();drawOverviewMap();if(raf)cancelAnimationFrame(raf);lastMove=Date.now();raf=requestAnimationFrame(movePlayer);
+ render();stopTimers();updateBuilderVisibility();refreshBuilderAccess();refreshRoads();refreshMapMarkers();drawCity();drawOverviewMap();if(raf)cancelAnimationFrame(raf);lastMove=Date.now();raf=requestAnimationFrame(movePlayer);
  startRealtime();clockTimer=setInterval(renderClock,250);saveTimer=setInterval(()=>{save();syncState()},5000);
  if(wellTimer)clearInterval(wellTimer);refreshWell();wellTimer=setInterval(refreshWell,3000);
  setIntervalSafeSync();
@@ -1274,9 +1274,14 @@ function renderAdminPlayers(){
    ${Object.entries(p.inventory||{}).map(([item,qty])=>`<div class="item"><span>${escapeAdminText(item)}: ${Number(qty||0).toLocaleString("fa-IR")}</span><button type="button" data-zero-resource="inventory_item" data-item="${escapeAdminText(item)}" data-player-id="${Number(p.id)}">صفر کردن</button></div>`).join("")}
    <button type="button" class="secondary full" data-zero-resource="inventory_all" data-player-id="${Number(p.id)}">صفر کردن کل کیف</button>
   </div>
-  <div class="notice">دسترسی ساخت آسفالت: ${(p.build_servers||[]).map(x=>({"1":"تهران","2":"اصفهان","3":"بندرعباس","4":"قشم","5":"اهواز"})[String(x)]||x).join("، ")||"ندارد"}</div>
-  <button type="button" class="secondary full" data-road-grant="${Number(p.id)}">🔓 دسترسی ساخت / انتخاب سرور</button>
-  <button type="button" class="secondary full" data-road-revoke="${Number(p.id)}" style="background:#663b3b">لغو دسترسی ساخت</button>
+  <div style="margin-top:9px;padding:9px;border:1px solid #d4ad4c;border-radius:9px;background:#132c22">
+   <div class="notice" style="font-weight:bold">🔓 انتخاب شهرهایی که این کاربر اجازه ساخت آسفالت دارد</div>
+   <div class="notice">دسترسی فعلی: ${(p.build_servers||[]).map(x=>({"1":"تهران","2":"اصفهان","3":"بندرعباس","4":"قشم","5":"اهواز"})[String(x)]||x).join("، ")||"هیچ شهری انتخاب نشده"}</div>
+   <div class="row" style="flex-wrap:wrap;gap:8px;margin:8px 0">
+    ${[["1","تهران"],["2","اصفهان"],["3","بندرعباس"],["4","قشم"],["5","اهواز"]].map(([sid,label])=>`<label style="display:flex;align-items:center;gap:5px;padding:6px 8px;border:1px solid #42685a;border-radius:8px"><input type="checkbox" data-road-city="${sid}" data-player-id="${Number(p.id)}" ${(p.build_servers||[]).map(String).includes(sid)?"checked":""}>${label}</label>`).join("")}
+   </div>
+   <button type="button" class="primary full" data-road-save="${Number(p.id)}">ذخیره دسترسی ساخت این کاربر</button>
+  </div>
   <div class="notice">ساخته‌شده: ${p.created_at?new Date(Number(p.created_at)*1000).toLocaleString("fa-IR"):"نامشخص"}</div>
   <button type="button" class="secondary" data-admin-delete="${Number(p.id)}" style="background:#7a2929;margin-top:6px">حذف کامل حساب</button>
  </div>`).join("")||"<div class=notice>حسابی پیدا نشد.</div>";
@@ -1298,6 +1303,24 @@ $("adminPlayersList").addEventListener("click",async e=>{
   zeroBtn.disabled=true;
   try{await api(`/admin/players/${id}/zero-resource`,{resource,item},{"X-Builder-Token":builderToken});await loadAdminPlayers();}
   catch(err){alert(err.message);zeroBtn.disabled=false;}
+  return;
+ }
+ const saveRoadBtn=e.target.closest("[data-road-save]");
+ if(saveRoadBtn){
+  if(!isCreatorAccount()||!builderToken){alert("فقط سازنده بازی می‌تواند دسترسی ساخت بدهد.");return;}
+  const id=Number(saveRoadBtn.dataset.roadSave),p=adminPlayersCache.find(x=>Number(x.id)===id);
+  if(!p)return;
+  const selected=[...document.querySelectorAll(`[data-road-city][data-player-id="${id}"]:checked`)].map(el=>el.dataset.roadCity);
+  const previous=(p.build_servers||[]).map(String);
+  const add=selected.filter(x=>!previous.includes(x));
+  const remove=previous.filter(x=>!selected.includes(x));
+  if(!confirm(selected.length?`دسترسی ساخت برای «${p.name}» فقط در شهرهای انتخاب‌شده ذخیره شود؟`:`تمام دسترسی‌های ساخت «${p.name}» لغو شود؟`))return;
+  saveRoadBtn.disabled=true;
+  try{
+   if(add.length)await api(`/admin/players/${id}/road-builder-grant`,{server_ids:add},{"X-Builder-Token":builderToken});
+   if(remove.length)await api(`/admin/players/${id}/road-builder-revoke`,{server_ids:remove},{"X-Builder-Token":builderToken});
+   await loadAdminPlayers();alert("دسترسی ساخت با موفقیت ذخیره شد.");
+  }catch(err){alert(err.message);saveRoadBtn.disabled=false;}
   return;
  }
  const grantBtn=e.target.closest("[data-road-grant]");
