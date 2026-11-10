@@ -1128,8 +1128,14 @@ function normalizedAccountName(){
  return String(account?.name||"").trim().replace(/\s+/g," ").toLocaleLowerCase();
 }
 function isCreatorAccount(){return !!account && normalizedAccountName()==="سازنده بازی";}
+let delegatedBuilderAccess=false;
 function isSupportBuilderAccount(){const n=normalizedAccountName();return !!account && ((n==="پشتیبانی2" && String(account.server_id||"")==="2") || (n==="پشتیبانی ۳" && String(account.server_id||"")==="3"));}
-function canUseRoadBuilder(){return isCreatorAccount()||isSupportBuilderAccount();}
+function canUseRoadBuilder(){return isCreatorAccount()||isSupportBuilderAccount()||delegatedBuilderAccess;}
+async function refreshBuilderAccess(){
+ if(!account||!authToken){delegatedBuilderAccess=false;updateBuilderVisibility();return;}
+ try{const d=await api('/builder/status');delegatedBuilderAccess=!!d.allowed;}catch(e){delegatedBuilderAccess=false;}
+ updateBuilderVisibility();
+}
 function updateBuilderVisibility(){
  const controls=$("builderControls");
  if(!controls)return;
@@ -1257,7 +1263,7 @@ function renderAdminPlayers(){
  $("adminPlayersStatus").textContent=`${rows.length} حساب از ${adminPlayersCache.length} حساب`;
  $("adminPlayersList").innerHTML=rows.map(p=>`<div style="border:1px solid #42685a;border-radius:10px;padding:10px;margin:7px 0;background:#10271f">
   <div style="font-weight:bold">${escapeAdminText(p.name)}</div>
-  <div class="notice">سن: ${Number(p.age)||"-"} | سرور: ${escapeAdminText(({"1":"تهران","2":"اصفهان","3":"بندرعباس","4":"قشم"})[String(p.server_id)]||p.server_id||"-")} | موجودی: ${Number(p.balance||0).toLocaleString("fa-IR")} تومان</div>
+  <div class="notice">سن: ${Number(p.age)||"-"} | سرور: ${escapeAdminText(({"1":"تهران","2":"اصفهان","3":"بندرعباس","4":"قشم","5":"اهواز"})[String(p.server_id)]||p.server_id||"-")} | موجودی: ${Number(p.balance||0).toLocaleString("fa-IR")} تومان</div>
   <div class="notice">امتیاز تجربه: ${Number(p.xp||0).toLocaleString("fa-IR")}</div>
   <div style="margin-top:8px;padding:8px;border:1px solid #345b49;border-radius:9px">
    <div class="notice" style="font-weight:bold">صفر کردن منابع به‌صورت جداگانه</div>
@@ -1268,6 +1274,9 @@ function renderAdminPlayers(){
    ${Object.entries(p.inventory||{}).map(([item,qty])=>`<div class="item"><span>${escapeAdminText(item)}: ${Number(qty||0).toLocaleString("fa-IR")}</span><button type="button" data-zero-resource="inventory_item" data-item="${escapeAdminText(item)}" data-player-id="${Number(p.id)}">صفر کردن</button></div>`).join("")}
    <button type="button" class="secondary full" data-zero-resource="inventory_all" data-player-id="${Number(p.id)}">صفر کردن کل کیف</button>
   </div>
+  <div class="notice">دسترسی ساخت آسفالت: ${(p.build_servers||[]).map(x=>({"1":"تهران","2":"اصفهان","3":"بندرعباس","4":"قشم","5":"اهواز"})[String(x)]||x).join("، ")||"ندارد"}</div>
+  <button type="button" class="secondary full" data-road-grant="${Number(p.id)}">🔓 دسترسی ساخت / انتخاب سرور</button>
+  <button type="button" class="secondary full" data-road-revoke="${Number(p.id)}" style="background:#663b3b">لغو دسترسی ساخت</button>
   <div class="notice">ساخته‌شده: ${p.created_at?new Date(Number(p.created_at)*1000).toLocaleString("fa-IR"):"نامشخص"}</div>
   <button type="button" class="secondary" data-admin-delete="${Number(p.id)}" style="background:#7a2929;margin-top:6px">حذف کامل حساب</button>
  </div>`).join("")||"<div class=notice>حسابی پیدا نشد.</div>";
@@ -1290,6 +1299,23 @@ $("adminPlayersList").addEventListener("click",async e=>{
   try{await api(`/admin/players/${id}/zero-resource`,{resource,item},{"X-Builder-Token":builderToken});await loadAdminPlayers();}
   catch(err){alert(err.message);zeroBtn.disabled=false;}
   return;
+ }
+ const grantBtn=e.target.closest("[data-road-grant]");
+ if(grantBtn){
+  const id=Number(grantBtn.dataset.roadGrant);
+  const raw=prompt("شماره سرور(ها) را وارد کن؛ برای چند سرور با ویرگول جدا کن:\n1 تهران، 2 اصفهان، 3 بندرعباس، 4 قشم، 5 اهواز", "5");
+  if(raw===null)return;
+  const ids=[...new Set(raw.split(/[،,\s]+/).filter(Boolean))];
+  if(!ids.length||ids.some(x=>!/^[1-5]$/.test(x))){alert("شماره سرور معتبر نیست.");return;}
+  if(!confirm("دسترسی ساخت آسفالت برای سرورهای "+ids.join("، ")+" فعال شود؟"))return;
+  try{await api(`/admin/players/${id}/road-builder-grant`,{server_ids:ids},{"X-Builder-Token":builderToken});await loadAdminPlayers();alert("دسترسی ساخت فعال شد.");}catch(err){alert(err.message);}return;
+ }
+ const revokeBtn=e.target.closest("[data-road-revoke]");
+ if(revokeBtn){
+  const id=Number(revokeBtn.dataset.roadRevoke),p=adminPlayersCache.find(x=>Number(x.id)===id);
+  if(!p||!(p.build_servers||[]).length){alert("این کاربر دسترسی ساختی ندارد.");return;}
+  if(!confirm("تمام دسترسی‌های ساخت این کاربر لغو شود؟"))return;
+  try{await api(`/admin/players/${id}/road-builder-revoke`,{server_ids:p.build_servers},{"X-Builder-Token":builderToken});await loadAdminPlayers();}catch(err){alert(err.message);}return;
  }
  const btn=e.target.closest("[data-admin-delete]");if(!btn)return;
  const id=Number(btn.dataset.adminDelete);const p=adminPlayersCache.find(x=>Number(x.id)===id);if(!p)return;
