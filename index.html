@@ -1835,10 +1835,31 @@ if(c3el){
 }
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"){moveX=0;moveY=0;pauseGameClock();}else if(account && !$("game").classList.contains("hidden")){resumeGameClock();}});
 
+// جلوگیری از انتخاب نام‌های دارای عنوان سازنده، مدیریت یا پشتیبانی.
+const RESERVED_NAME_TERMS=[
+ "سازنده","خالق","بازی","توسعه","پشتیبانی","مدیر","مدیریت","ادمین",
+ "مالک","صاحب","خدا","الله","پروردگار",
+ "creator","create","founder","owner","admin","administrator",
+ "moderator","mod","staff","support","developer","development",
+ "dev","game","gaming","official","management","manager","operator",
+ "master","team","god"
+];
+function normalizeNameForFilter(value){
+ return String(value||"").normalize("NFKC").toLocaleLowerCase()
+  .replace(/[يى]/g,"ی").replace(/ك/g,"ک").replace(/[^\p{L}\p{N}]/gu,"");
+}
+function isReservedPlayerName(value){
+ const normalized=normalizeNameForFilter(value);
+ return RESERVED_NAME_TERMS.some(term=>normalized.includes(normalizeNameForFilter(term)));
+}
 $("registerBtn").onclick=async()=>{
  const name=$("regName").value.trim(),age=Number($("regAge").value),pass=$("regPass").value;
  $("regMsg").textContent="";
  if(name.length<2){$("regMsg").textContent="نام باید حداقل ۲ حرف باشد.";return}
+ if(isReservedPlayerName(name)){
+  $("regMsg").textContent="این نام مجاز نیست؛ نام‌های مربوط به سازنده، خالق، بازی، توسعه‌دهنده، پشتیبانی و مدیریت قابل ثبت نیستند.";
+  return;
+ }
  if(!Number.isInteger(age)||age<1||age>120){$("regMsg").textContent="سن را درست وارد کن.";return}
  if(pass.length<4){$("regMsg").textContent="رمز حداقل ۴ حرف یا عدد باشد.";return}
  try{
