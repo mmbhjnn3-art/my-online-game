@@ -23,6 +23,18 @@ except ImportError:
     webpush = None
     WebPushException = Exception
 
+try:
+    import firebase_admin
+    from firebase_admin import credentials, messaging
+except ImportError:
+    firebase_admin = None
+    credentials = None
+    messaging = None
+
+FCM_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+FCM_ENABLED = bool(firebase_admin and FCM_SERVICE_ACCOUNT_JSON)
+_fcm_app = None
+
 VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "").strip()
 VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "").strip()
 VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "https://my-online-game-67j9.onrender.com").strip()
@@ -123,6 +135,15 @@ def init_db():
             )
         """)
         db.execute("CREATE INDEX IF NOT EXISTS idx_push_subscriptions_player ON push_subscriptions(player_id)")
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS fcm_tokens (
+                token TEXT PRIMARY KEY,
+                player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                created_at BIGINT NOT NULL,
+                updated_at BIGINT NOT NULL
+            )
+        """)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_fcm_tokens_player ON fcm_tokens(player_id)")
         db.execute("""
             CREATE TABLE IF NOT EXISTS server_wells (
                 server_id TEXT PRIMARY KEY,
@@ -433,6 +454,10 @@ class PushSubscriptionIn(BaseModel):
 
 class PushMessageIn(BaseModel):
     message: str = Field(min_length=1, max_length=240)
+
+
+class FCMTokenIn(BaseModel):
+    token: str = Field(min_length=20, max_length=8192)
 
 
 class PresenceIn(BaseModel):
@@ -1346,23 +1371,65 @@ async def delete_map_marker(
     return {"ok": True, "deleted_id": data.marker_id}
 
 
-def send_push_to_offline(message, title="زندگی مجازی"):
-    """Send Web Push only to accounts that are not currently inside the game."""
-    if not PUSH_ENABLED:
-        raise RuntimeError("سرویس اعلان روی سرور تنظیم نشده است.")
-    cutoff = int(time.time()) - ACTIVE_SECONDS
-    with connect() as db:
-        rows = db.execute(
-            """SELECT ps.endpoint, ps.subscription_json
-            FROM push_subscriptions ps
-            LEFT JOIN sessions s ON s.player_id=ps.player_id
-            WHERE s.player_id IS NULL OR s.is_visible=FALSE OR s.last_seen<?""",
-            (cutoff,)
-        ).fetchall()
+def _get_firebase_app():
+    """Create/reuse the Firebase Admin app from the Render environment secret."""
+    global _fcm_app
+    if not FCM_ENABLED:
+        return None
+    if _fcm_app is not None:
+        return _fcm_app
+    try:
+        service_account = json.loads(FCM_SERVICE_ACCOUNT_JSON)
+        try:
+            _fcm_app = firebase_admin.get_app("zendegi-life-fcm")
+        except ValueError:
+            _fcm_app = firebase_admin.initialize_app(
+                credentials.Certificate(service_account),
+                name="zendegi-life-fcm"
+            )
+        return _fcm_app
+    except Exception as exc:
+        raise RuntimeError("تنظیم FIREBASE_SERVICE_ACCOUNT_JSON معتبر نیست: " + str(exc)) from exc
 
-    sent, stale = 0, []
+
+def send_push_to_offline(message, title="زندگی مجازی"):
+    """Send Web Push and/or FCM only to players currently outside the game."""
+    if not PUSH_ENABLED and not FCM_ENABLED:
+        raise RuntimeError("سرویس اعلان تنظیم نشده است؛ کلیدهای VAPID یا Firebase را در Environment وارد کنید.")
+
+    cutoff = int(time.time()) - ACTIVE_SECONDS
+    sent = 0
+    targeted = 0
+    stale_web = []
+    stale_fcm = []
+
+    with connect() as db:
+        if PUSH_ENABLED:
+            web_rows = db.execute(
+                """SELECT DISTINCT ps.endpoint, ps.subscription_json
+                FROM push_subscriptions ps
+                LEFT JOIN sessions s ON s.player_id=ps.player_id
+                WHERE s.player_id IS NULL OR s.is_visible=FALSE OR s.last_seen<?""",
+                (cutoff,)
+            ).fetchall()
+        else:
+            web_rows = []
+
+        if FCM_ENABLED:
+            fcm_rows = db.execute(
+                """SELECT DISTINCT ft.token
+                FROM fcm_tokens ft
+                LEFT JOIN sessions s ON s.player_id=ft.player_id
+                WHERE s.player_id IS NULL OR s.is_visible=FALSE OR s.last_seen<?""",
+                (cutoff,)
+            ).fetchall()
+        else:
+            fcm_rows = []
+
+    targeted = len(web_rows) + len(fcm_rows)
     payload = json.dumps({"title": title, "body": message, "url": "/"}, ensure_ascii=False)
-    for row in rows:
+
+    for row in web_rows:
         try:
             webpush(
                 subscription_info=json.loads(row["subscription_json"]),
@@ -1374,19 +1441,47 @@ def send_push_to_offline(message, title="زندگی مجازی"):
         except Exception as exc:
             response = getattr(exc, "response", None)
             if getattr(response, "status_code", None) in (404, 410):
-                stale.append(row["endpoint"])
-    if stale:
+                stale_web.append(row["endpoint"])
+
+    if fcm_rows:
+        app_fcm = _get_firebase_app()
+        # Firebase Admin accepts at most 500 registration tokens per multicast message.
+        for offset in range(0, len(fcm_rows), 500):
+            chunk = [r["token"] for r in fcm_rows[offset:offset + 500]]
+            try:
+                response = messaging.send_each_for_multicast(
+                    messaging.MulticastMessage(
+                        notification=messaging.Notification(title=title, body=message),
+                        tokens=chunk
+                    ),
+                    app=app_fcm
+                )
+                sent += response.success_count
+                for token, result in zip(chunk, response.responses):
+                    if not result.success:
+                        code = getattr(result.exception, "code", "")
+                        if code in ("messaging/registration-token-not-registered",
+                                    "messaging/invalid-registration-token",
+                                    "messaging/invalid-argument"):
+                            stale_fcm.append(token)
+            except Exception as exc:
+                raise RuntimeError("ارسال اعلان Firebase ناموفق بود: " + str(exc)) from exc
+
+    if stale_web or stale_fcm:
         with connect() as db:
-            for endpoint in stale:
+            for endpoint in stale_web:
                 db.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (endpoint,))
-    return {"targeted": len(rows), "sent": sent, "removed": len(stale)}
+            for token in stale_fcm:
+                db.execute("DELETE FROM fcm_tokens WHERE token=?", (token,))
+
+    return {"targeted": targeted, "sent": sent, "removed": len(stale_web) + len(stale_fcm)}
 
 
 async def announcement_push_worker():
     """Send the update-finished push once when its countdown expires."""
     while True:
         try:
-            if PUSH_ENABLED:
+            if PUSH_ENABLED or FCM_ENABLED:
                 now = int(time.time())
                 with connect() as db:
                     due = db.execute(
@@ -1464,6 +1559,29 @@ def save_push_subscription(
     return {"ok": True}
 
 
+@app.post("/api/fcm/register")
+def register_fcm_token(
+    data: FCMTokenIn,
+    authorization: str | None = Header(default=None)
+):
+    """Attach this Android installation's FCM token to the authenticated player."""
+    token = data.token.strip()
+    if len(token) < 20 or any(ch.isspace() for ch in token):
+        raise HTTPException(400, "توکن اعلان معتبر نیست.")
+    with connect() as db:
+        player = current_player(db, authorization)
+        now = int(time.time())
+        db.execute(
+            """INSERT INTO fcm_tokens(token, player_id, created_at, updated_at)
+            VALUES(?,?,?,?)
+            ON CONFLICT(token) DO UPDATE SET
+                player_id=EXCLUDED.player_id,
+                updated_at=EXCLUDED.updated_at""",
+            (token, player["id"], now, now)
+        )
+    return {"ok": True}
+
+
 @app.post("/api/push/send")
 async def send_creator_push(
     data: PushMessageIn,
@@ -1472,8 +1590,8 @@ async def send_creator_push(
 ):
     with connect() as db:
         require_builder(db, authorization, x_builder_token)
-    if not PUSH_ENABLED:
-        raise HTTPException(503, "سرویس اعلان هنوز روی سرور تنظیم نشده است.")
+    if not PUSH_ENABLED and not FCM_ENABLED:
+        raise HTTPException(503, "سرویس اعلان هنوز روی سرور تنظیم نشده است؛ کلید Firebase یا VAPID را وارد کنید.")
     result = await asyncio.to_thread(send_push_to_offline, data.message.strip())
     return {"ok": True, **result}
 
