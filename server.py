@@ -7,6 +7,7 @@ import hmac
 import time
 import asyncio
 import math
+import unicodedata
 from pathlib import Path
 
 import psycopg
@@ -207,6 +208,34 @@ init_db()
 
 def norm_name(name):
     return " ".join(name.strip().split()).casefold()
+
+
+# نام‌های دارای عنوان یا هویت مدیریتی/رسمی بازی نباید ثبت شوند.
+# نرمال‌سازی، تفاوت حروف عربی/فارسی، بزرگی حروف و جداکننده‌ها را خنثی می‌کند.
+FORBIDDEN_NAME_TERMS = (
+    "سازنده", "خالق", "بازی", "توسعه", "پشتیبانی", "پشتيباني",
+    "مدیر", "مدير", "مدیریت", "مديريت", "ادمین", "ادمین", "مدیرکل",
+    "مالک", "صاحب", "خدا", "الله", "پروردگار",
+    "creator", "founder", "owner", "admin", "administrator",
+    "moderator", "staff", "support", "developer", "development",
+    "game", "gaming", "official", "management", "manager",
+    "operator", "master", "team", "god"
+)
+
+
+def normalize_name_for_filter(name):
+    value = unicodedata.normalize("NFKC", str(name)).casefold()
+    value = value.translate(str.maketrans({"ي": "ی", "ى": "ی", "ك": "ک"}))
+    # فاصله، نقطه، خط تیره، نیم‌فاصله و نمادها حذف می‌شوند تا دور زدن فیلتر سخت شود.
+    return "".join(ch for ch in value if ch.isalnum())
+
+
+def is_reserved_player_name(name):
+    normalized = normalize_name_for_filter(name)
+    return any(
+        normalize_name_for_filter(term) in normalized
+        for term in FORBIDDEN_NAME_TERMS
+    )
 
 
 def password_hash(password, salt):
@@ -517,6 +546,12 @@ def register(data: RegisterIn):
     sid = str(data.server_id)
     name = " ".join(data.name.strip().split())
     key = norm_name(name)
+
+    if is_reserved_player_name(name):
+        raise HTTPException(
+            400,
+            "این نام قابل ثبت نیست؛ نام‌های مربوط به سازنده، خالق، بازی، توسعه‌دهنده، پشتیبانی و مدیریت مجاز نیستند."
+        )
 
     salt = secrets.token_bytes(16)
     ph = password_hash(data.password, salt)
