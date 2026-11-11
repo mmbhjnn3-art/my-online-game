@@ -13,7 +13,7 @@
 .wrap{width:min(100%,560px);margin:auto;padding:14px 13px 38px}.brand{text-align:center;padding:13px 0 10px}.logo{font-size:38px}.brand h1{margin:5px 0;font-size:26px}.brand p{margin:0;color:var(--muted);font-size:12px}
 .card{background:linear-gradient(145deg,#21483b,#162f27);border:1px solid #376553;border-radius:19px;padding:16px;margin:11px 0;box-shadow:0 10px 30px #0003}
 h2{font-size:18px;margin:0 0 13px}.field{margin:11px 0}.field label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
-input{width:100%;border:1px solid #557968;border-radius:11px;background:#f4f7f2;color:#111;padding:13px;font-size:16px;outline:none}input:focus{border-color:var(--gold)}
+input,textarea{width:100%;border:1px solid #557968;border-radius:11px;background:#f4f7f2;color:#111;padding:13px;font-size:16px;outline:none;font-family:inherit}textarea{resize:vertical;min-height:86px}input:focus,textarea:focus{border-color:var(--gold)}
 button{border:0;border-radius:12px;padding:13px 14px;font-size:14px;font-weight:bold;cursor:pointer;font-family:inherit}
 .primary{background:var(--gold);color:#28210c;width:100%;margin-top:7px}.secondary{background:#315c4b;color:white;border:1px solid #58816e}.danger{background:#663b3b;color:#fff}.full{width:100%;margin-top:8px}
 .row{display:flex;gap:8px}.row>*{flex:1}.hidden{display:none!important}.msg{min-height:20px;color:var(--gold);font-size:12px;margin-top:8px;text-align:center}
@@ -319,6 +319,14 @@ body.immersive-camera #cameraExitBtn{display:block}
      <div class="field"><label for="updateMinutesInput">مدت زمان باقی‌مانده (دقیقه)</label><input id="updateMinutesInput" type="number" min="1" max="10080" inputmode="numeric" placeholder="مثلاً ۳۰"></div>
      <button id="publishUpdateButton" class="primary full" type="button">نمایش اطلاعیه برای همه و شروع تایمر</button>
      <div id="updateManagementMsg" class="msg"></div>
+     <div style="margin-top:14px;padding-top:12px;border-top:1px solid #42685a">
+      <h2>🔔 ارسال اعلان به بازیکنان خارج از بازی</h2>
+      <div class="field"><label for="creatorPushMessage">متن اعلان (همین متن برای بازیکنان ارسال می‌شود)</label>
+       <textarea id="creatorPushMessage" maxlength="240" rows="3" placeholder="پیام خودت را بنویس..."></textarea>
+      </div>
+      <button id="sendCreatorPushButton" class="primary full" type="button">تأیید و ارسال اعلان</button>
+      <div id="creatorPushStatus" class="msg" aria-live="polite"></div>
+     </div>
     </div>
    </div>
    <div class="world" style="margin-top:10px">
@@ -374,6 +382,8 @@ body.immersive-camera #cameraExitBtn{display:block}
  <div class="card">
   <h2>⚙️ ذخیره و تنظیمات</h2>
   <button class="secondary full" id="cityGuideButton" type="button">🗺️ راهنمای شهر</button>
+  <button class="secondary full" id="enablePushButton" type="button">🔔 فعال‌سازی اعلان‌های خارج از بازی</button>
+  <div class="msg" id="pushStatus" aria-live="polite">برای دریافت اعلان وقتی بیرون از بازی هستی، اعلان‌ها را فعال کن.</div>
   <button class="danger full hidden" id="resetBtn" type="button" aria-hidden="true" tabindex="-1">ریست بازی</button>
   <div class="row"><button class="secondary" id="exportBtn">پشتیبان‌گیری</button><button class="secondary" id="importBtn">بازیابی پشتیبان</button></div>
   <input class="hidden" id="importFile" type="file" accept="application/json">
@@ -406,6 +416,38 @@ async function api(path,body,extraHeaders={}){
   throw e;
  }finally{clearTimeout(timeout)}
 }
+function decodeVapidKey(value){
+ const padding="=".repeat((4-value.length%4)%4);
+ const base64=(value+padding).replace(/-/g,"+").replace(/_/g,"/");
+ const raw=atob(base64),output=new Uint8Array(raw.length);
+ for(let i=0;i<raw.length;i++)output[i]=raw.charCodeAt(i);
+ return output;
+}
+$("enablePushButton").addEventListener("click",async()=>{
+ const button=$("enablePushButton"),status=$("pushStatus");
+ if(!account||!authToken){status.textContent="ابتدا وارد حساب بازی شو.";return;}
+ if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window)){
+  status.textContent="این مرورگر از اعلان اینترنتی پشتیبانی نمی‌کند؛ بازی را در Chrome به‌روز باز کن.";return;
+ }
+ if(!window.isSecureContext){status.textContent="برای فعال‌سازی اعلان، بازی باید با آدرس امن HTTPS باز شود.";return;}
+ button.disabled=true;status.textContent="در حال فعال‌سازی اعلان‌ها...";
+ try{
+  const permission=await Notification.requestPermission();
+  if(permission!=="granted")throw new Error("اجازه اعلان از تنظیمات مرورگر داده نشد.");
+  const keyData=await api("/push/public-key");
+  if(!keyData.public_key)throw new Error("کلید اعلان روی سرور تنظیم نشده است.");
+  const registration=await navigator.serviceWorker.register("/sw.js",{scope:"/"});
+  await navigator.serviceWorker.ready;
+  let subscription=await registration.pushManager.getSubscription();
+  if(!subscription)subscription=await registration.pushManager.subscribe({
+   userVisibleOnly:true,applicationServerKey:decodeVapidKey(keyData.public_key)
+  });
+  await api("/push/subscribe",{subscription:subscription.toJSON()});
+  status.textContent="✓ اعلان‌های خارج از بازی برای این حساب فعال شد.";
+  button.textContent="✓ اعلان‌های خارج از بازی فعال است";
+ }catch(e){status.textContent=e.message||"فعال‌سازی اعلان انجام نشد.";}
+ finally{button.disabled=false;}
+});
 let dismissedAnnouncementId=null;
 try{dismissedAnnouncementId=localStorage.getItem("zendegi_dismissed_update_id");}catch(e){}
 function renderAnnouncement(){
@@ -1920,6 +1962,20 @@ $("publishUpdateButton").onclick=async()=>{
  }catch(e){$("updateManagementMsg").textContent=e.message;}
  finally{button.disabled=false;}
 };
+$("sendCreatorPushButton").onclick=async()=>{
+ if(!isCreatorAccount()||!builderToken)return;
+ const message=$("creatorPushMessage").value.trim();
+ if(!message){$("creatorPushStatus").textContent="اول متن اعلان را بنویس.";return;}
+ if(!confirm("این پیام فقط برای بازیکنانی که خارج از بازی هستند ارسال شود؟"))return;
+ const button=$("sendCreatorPushButton");button.disabled=true;
+ $("creatorPushStatus").textContent="در حال ارسال اعلان...";
+ try{
+  const d=await api("/push/send",{message},{"X-Builder-Token":builderToken});
+  $("creatorPushStatus").textContent=`اعلان ارسال شد؛ ${d.sent} دستگاه دریافت کرد.`;
+  $("creatorPushMessage").value="";
+ }catch(e){$("creatorPushStatus").textContent=e.message;}
+ finally{button.disabled=false;}
+};
 $("rewardBtn").onclick=async()=>{
  if(!account||!authToken)return;
  $("rewardBtn").disabled=true;
@@ -1987,7 +2043,16 @@ $("importFile").onchange=async e=>{
  const all=readAll();all[a.nameKey]=a;writeAll(all);$("loginName").value=a.name;$("loginMsg").textContent="پشتیبان بازیابی شد؛ حالا با رمز عبورت وارد شو.";
  }catch(err){alert("فایل پشتیبان معتبر نیست.");}e.target.value="";
 };
-document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"){save();if(account&&authToken)fetch(API+"/save",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+authToken},body:JSON.stringify({state:account})}).catch(()=>{});}});
+document.addEventListener("visibilitychange",()=>{
+ if(!account||!authToken)return;
+ const visible=document.visibilityState==="visible";
+ fetch(API+"/presence",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+authToken},
+  body:JSON.stringify({visible}),keepalive:!visible,cache:"no-store"}).catch(()=>{});
+ if(!visible){
+  save();
+  fetch(API+"/save",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+authToken},body:JSON.stringify({state:account}),keepalive:true}).catch(()=>{});
+ }
+});
 window.addEventListener("pagehide",save);window.addEventListener("beforeunload",save);
 
 // افزوده‌شده: مدیریت صفحه قطع اینترنت؛ بدون تغییر منطق اصلی بازی
