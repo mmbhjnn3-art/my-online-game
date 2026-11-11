@@ -17,6 +17,16 @@ from fastapi import FastAPI, HTTPException, Header, WebSocket, WebSocketDisconne
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
+try:
+    from pywebpush import webpush, WebPushException
+except ImportError:
+    webpush = None
+    WebPushException = Exception
+
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "").strip()
+VAPID_SUBJECT = os.getenv("VAPID_SUBJECT", "https://my-online-game-67j9.onrender.com").strip()
+PUSH_ENABLED = bool(webpush and VAPID_PRIVATE_KEY and VAPID_PUBLIC_KEY)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 if DATABASE_URL.startswith("postgres://"):
@@ -103,6 +113,16 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_sessions_server_seen
             ON sessions(server_id, last_seen)
         """)
+        db.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE")
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                endpoint TEXT PRIMARY KEY,
+                player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                subscription_json TEXT NOT NULL,
+                created_at BIGINT NOT NULL
+            )
+        """)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_push_subscriptions_player ON push_subscriptions(player_id)")
         db.execute("""
             CREATE TABLE IF NOT EXISTS server_wells (
                 server_id TEXT PRIMARY KEY,
@@ -162,9 +182,11 @@ def init_db():
                 message TEXT NOT NULL,
                 starts_at BIGINT NOT NULL,
                 ends_at BIGINT NOT NULL,
-                created_by BIGINT REFERENCES players(id) ON DELETE SET NULL
+                created_by BIGINT REFERENCES players(id) ON DELETE SET NULL,
+                push_sent_at BIGINT
             )
         """)
+        db.execute("ALTER TABLE game_announcement ADD COLUMN IF NOT EXISTS push_sent_at BIGINT")
         db.execute("""
             CREATE TABLE IF NOT EXISTS builder_credentials (
                 creator_name TEXT PRIMARY KEY,
@@ -403,6 +425,18 @@ class RoadBuilderGrantIn(BaseModel):
 class AnnouncementIn(BaseModel):
     message: str = Field(min_length=1, max_length=240)
     duration_minutes: int = Field(ge=1, le=10080)
+
+
+class PushSubscriptionIn(BaseModel):
+    subscription: dict
+
+
+class PushMessageIn(BaseModel):
+    message: str = Field(min_length=1, max_length=240)
+
+
+class PresenceIn(BaseModel):
+    visible: bool
 
 
 class AdminZeroResourceIn(BaseModel):
@@ -936,6 +970,24 @@ def heartbeat(authorization: str | None = Header(default=None)):
     return {"ok": True}
 
 
+@app.post("/api/presence")
+def update_presence(
+    data: PresenceIn,
+    authorization: str | None = Header(default=None)
+):
+    """Track page visibility; old sessions expire through their regular heartbeat."""
+    now = int(time.time())
+    with connect() as db:
+        player = current_player(db, authorization)
+        if data.visible:
+            db.execute("UPDATE sessions SET is_visible=TRUE, last_seen=? WHERE token=?",
+                       (now, player["token"]))
+        else:
+            db.execute("UPDATE sessions SET is_visible=FALSE WHERE token=?",
+                       (player["token"],))
+    return {"ok": True, "visible": data.visible}
+
+
 @app.post("/api/logout")
 def logout(authorization: str | None = Header(default=None)):
     if not authorization or not authorization.startswith("Bearer "):
@@ -1292,6 +1344,138 @@ async def delete_map_marker(
         "type": "map_marker_deleted", "marker": dict(row)
     })
     return {"ok": True, "deleted_id": data.marker_id}
+
+
+def send_push_to_offline(message, title="زندگی مجازی"):
+    """Send Web Push only to accounts that are not currently inside the game."""
+    if not PUSH_ENABLED:
+        raise RuntimeError("سرویس اعلان روی سرور تنظیم نشده است.")
+    cutoff = int(time.time()) - ACTIVE_SECONDS
+    with connect() as db:
+        rows = db.execute(
+            """SELECT ps.endpoint, ps.subscription_json
+            FROM push_subscriptions ps
+            LEFT JOIN sessions s ON s.player_id=ps.player_id
+            WHERE s.player_id IS NULL OR s.is_visible=FALSE OR s.last_seen<?""",
+            (cutoff,)
+        ).fetchall()
+
+    sent, stale = 0, []
+    payload = json.dumps({"title": title, "body": message, "url": "/"}, ensure_ascii=False)
+    for row in rows:
+        try:
+            webpush(
+                subscription_info=json.loads(row["subscription_json"]),
+                data=payload,
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": VAPID_SUBJECT}
+            )
+            sent += 1
+        except Exception as exc:
+            response = getattr(exc, "response", None)
+            if getattr(response, "status_code", None) in (404, 410):
+                stale.append(row["endpoint"])
+    if stale:
+        with connect() as db:
+            for endpoint in stale:
+                db.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (endpoint,))
+    return {"targeted": len(rows), "sent": sent, "removed": len(stale)}
+
+
+async def announcement_push_worker():
+    """Send the update-finished push once when its countdown expires."""
+    while True:
+        try:
+            if PUSH_ENABLED:
+                now = int(time.time())
+                with connect() as db:
+                    due = db.execute(
+                        """SELECT id FROM game_announcement
+                        WHERE ends_at<=? AND push_sent_at IS NULL
+                        ORDER BY id ASC LIMIT 10""", (now,)
+                    ).fetchall()
+                for item in due:
+                    await asyncio.to_thread(
+                        send_push_to_offline,
+                        "بروزرسانی بازی به پایان رسید. بازی آماده ورود است!"
+                    )
+                    with connect() as db:
+                        db.execute(
+                            "UPDATE game_announcement SET push_sent_at=? WHERE id=? AND push_sent_at IS NULL",
+                            (int(time.time()), item["id"])
+                        )
+        except Exception:
+            pass
+        await asyncio.sleep(10)
+
+
+@app.on_event("startup")
+async def start_announcement_push_worker():
+    app.state.announcement_push_task = asyncio.create_task(announcement_push_worker())
+
+
+@app.on_event("shutdown")
+async def stop_announcement_push_worker():
+    task = getattr(app.state, "announcement_push_task", None)
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@app.get("/sw.js")
+def service_worker():
+    path = Path(__file__).with_name("sw.js")
+    if not path.exists():
+        raise HTTPException(404, "فایل سرویس اعلان پیدا نشد.")
+    return FileResponse(path, media_type="application/javascript",
+                         headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"})
+
+
+@app.get("/api/push/public-key")
+def get_push_public_key():
+    if not PUSH_ENABLED:
+        raise HTTPException(503, "سرویس اعلان هنوز روی سرور تنظیم نشده است.")
+    return {"public_key": VAPID_PUBLIC_KEY}
+
+
+@app.post("/api/push/subscribe")
+def save_push_subscription(
+    data: PushSubscriptionIn,
+    authorization: str | None = Header(default=None)
+):
+    subscription = data.subscription
+    endpoint = str(subscription.get("endpoint", "")).strip()
+    keys = subscription.get("keys") if isinstance(subscription, dict) else None
+    if not endpoint.startswith("https://") or not isinstance(keys, dict) or not keys.get("p256dh") or not keys.get("auth"):
+        raise HTTPException(400, "اطلاعات اشتراک اعلان معتبر نیست.")
+    with connect() as db:
+        player = current_player(db, authorization)
+        db.execute(
+            """INSERT INTO push_subscriptions(endpoint, player_id, subscription_json, created_at)
+            VALUES(?,?,?,?)
+            ON CONFLICT(endpoint) DO UPDATE SET
+                player_id=EXCLUDED.player_id,
+                subscription_json=EXCLUDED.subscription_json""",
+            (endpoint, player["id"], json.dumps(subscription), int(time.time()))
+        )
+    return {"ok": True}
+
+
+@app.post("/api/push/send")
+async def send_creator_push(
+    data: PushMessageIn,
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None)
+):
+    with connect() as db:
+        require_builder(db, authorization, x_builder_token)
+    if not PUSH_ENABLED:
+        raise HTTPException(503, "سرویس اعلان هنوز روی سرور تنظیم نشده است.")
+    result = await asyncio.to_thread(send_push_to_offline, data.message.strip())
+    return {"ok": True, **result}
 
 
 @app.get("/api/announcement")
