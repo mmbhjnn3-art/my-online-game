@@ -382,8 +382,8 @@ body.immersive-camera #cameraExitBtn{display:block}
  <div class="card">
   <h2>⚙️ ذخیره و تنظیمات</h2>
   <button class="secondary full" id="cityGuideButton" type="button">🗺️ راهنمای شهر</button>
-  <button class="secondary full" id="enablePushButton" type="button">🔔 فعال‌سازی اعلان‌های خارج از بازی</button>
-  <div class="msg" id="pushStatus" aria-live="polite">برای دریافت اعلان وقتی بیرون از بازی هستی، اعلان‌ها را فعال کن.</div>
+  <button class="secondary full" id="enablePushButton" type="button" disabled aria-disabled="true">🔔 فعال‌سازی اعلان‌های خارج از بازی</button>
+  <div class="msg" id="pushStatus" aria-live="polite">🔔 اعلان‌ها هنوز در حال ساخت هستند.</div>
   <button class="danger full hidden" id="resetBtn" type="button" aria-hidden="true" tabindex="-1">ریست بازی</button>
   <div class="row"><button class="secondary" id="exportBtn">پشتیبان‌گیری</button><button class="secondary" id="importBtn">بازیابی پشتیبان</button></div>
   <input class="hidden" id="importFile" type="file" accept="application/json">
@@ -425,6 +425,7 @@ function decodeVapidKey(value){
 }
 $("enablePushButton").addEventListener("click",async()=>{
  const button=$("enablePushButton"),status=$("pushStatus");
+ if(button.disabled){status.textContent="🔔 اعلان‌ها هنوز در حال ساخت هستند.";return;}
  if(!account||!authToken){status.textContent="ابتدا وارد حساب بازی شو.";return;}
  if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window)){
   status.textContent="این مرورگر از اعلان اینترنتی پشتیبانی نمی‌کند؛ بازی را در Chrome به‌روز باز کن.";return;
