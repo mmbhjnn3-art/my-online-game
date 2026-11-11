@@ -399,6 +399,7 @@ const KEY="zendegi_life_game_v1", $=id=>document.getElementById(id);
 const SERVER_ORIGIN="https://my-online-game-67j9.onrender.com";
 const API=SERVER_ORIGIN+"/api";
 let authToken=null, selectedServer="1", onlinePlayers=[], syncBusy=false;
+let pendingAppInventorFcmToken=null, registeredAppInventorFcmToken="", fcmRegisterBusy=false;
 let wellState={stock:100,last_regen_at:0};
 let syncTimer=null,wellTimer=null;
 let realtimeSocket=null, realtimeSendTimer=null, realtimePingTimer=null, realtimeReconnectTimer=null, realtimeRetryCount=0, realtimeLastPong=0;
@@ -416,6 +417,33 @@ async function api(path,body,extraHeaders={}){
   throw e;
  }finally{clearTimeout(timeout)}
 }
+
+// دریافت توکن FCM از MIT App Inventor از طریق WebViewString؛ مقدار JSON ذخیره بازی نادیده گرفته می‌شود.
+function readAppInventorFcmToken(){
+ try{
+  if(!window.AppInventor||typeof window.AppInventor.getWebViewString!=="function")return null;
+  let raw=String(window.AppInventor.getWebViewString()||"").trim();
+  if(raw.startsWith("FCM_TOKEN:"))raw=raw.slice(10).trim();
+  if(!raw||raw.startsWith("{")||raw.startsWith("["))return null;
+  if(raw.length<20||raw.length>8192||/\s/.test(raw))return null;
+  return raw;
+ }catch(e){return null;}
+}
+async function registerPendingFcmToken(){
+ if(!authToken||!pendingAppInventorFcmToken||fcmRegisterBusy||pendingAppInventorFcmToken===registeredAppInventorFcmToken)return;
+ fcmRegisterBusy=true;
+ try{
+  await api("/fcm/register",{token:pendingAppInventorFcmToken});
+  registeredAppInventorFcmToken=pendingAppInventorFcmToken;
+ }catch(e){console.warn("ثبت توکن اعلان انجام نشد:",e.message);}
+ finally{fcmRegisterBusy=false;}
+}
+function pollAppInventorFcmToken(){
+ const token=readAppInventorFcmToken();
+ if(token&&token!==pendingAppInventorFcmToken){pendingAppInventorFcmToken=token;registeredAppInventorFcmToken="";}
+ if(pendingAppInventorFcmToken&&authToken)registerPendingFcmToken();
+}
+setInterval(pollAppInventorFcmToken,1200);
 function decodeVapidKey(value){
  const padding="=".repeat((4-value.length%4)%4);
  const base64=(value+padding).replace(/-/g,"+").replace(/_/g,"/");
@@ -538,6 +566,9 @@ function readAll(){
  }
 }
 function writeAll(d){
+ // اگر App Inventor همین حالا توکن خام را فرستاده باشد، قبل از ذخیره JSON بازی نگهش دار.
+ const incomingFcmToken=readAppInventorFcmToken();
+ if(incomingFcmToken&&incomingFcmToken!==pendingAppInventorFcmToken){pendingAppInventorFcmToken=incomingFcmToken;registeredAppInventorFcmToken="";}
  const raw=JSON.stringify(d);
  // Keep a durable WebView-local copy as well as the App Inventor bridge copy.
  try{localStorage.setItem(KEY,raw);}catch(e){}
@@ -1908,7 +1939,7 @@ $("registerBtn").onclick=async()=>{
  try{
   selectedServer=$("serverSelect").value;
   const d=await api("/register",{name,age,password:pass,server_id:Number(selectedServer)});
-  authToken=d.token;account=d.state;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";account.nameKey=String(account.name||name).trim().replace(/\s+/g," ").toLocaleLowerCase();account.lastActiveAt=Date.now();
+  authToken=d.token;registeredAppInventorFcmToken="";account=d.state;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";account.nameKey=String(account.name||name).trim().replace(/\s+/g," ").toLocaleLowerCase();account.lastActiveAt=Date.now();
   log("شروع زندگی در سرور "+selectedServer);save();showGame();
  }catch(e){$("regMsg").textContent=e.message}
 };
@@ -1932,7 +1963,7 @@ $("loginBtn").onclick=async()=>{
  try{
   selectedServer=$("serverSelect").value;
   const d=await api("/login",{name,password:pass,server_id:Number(selectedServer)});
-  authToken=d.token;account=d.state;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";account.nameKey=String(account.name||name).trim().replace(/\s+/g," ").toLocaleLowerCase();account.lastActiveAt=null;
+  authToken=d.token;registeredAppInventorFcmToken="";account=d.state;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";account.nameKey=String(account.name||name).trim().replace(/\s+/g," ").toLocaleLowerCase();account.lastActiveAt=null;
   account.inventory=account.inventory||{};account.journal=account.journal||[];account.xp=account.xp||0;
   account.playerX=Math.max(-CITY_HALF,Math.min(CITY_HALF,Number.isFinite(account.playerX)?account.playerX:0));account.playerY=Math.max(-CITY_HALF,Math.min(CITY_HALF,Number.isFinite(account.playerY)?account.playerY:0));
   account.cameraX=Number.isFinite(account.cameraX)?account.cameraX:0;account.cameraY=Number.isFinite(account.cameraY)?account.cameraY:0;
