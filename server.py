@@ -209,6 +209,15 @@ def init_db():
         """)
         db.execute("ALTER TABLE game_announcement ADD COLUMN IF NOT EXISTS push_sent_at BIGINT")
         db.execute("""
+            CREATE TABLE IF NOT EXISTS game_notifications (
+                id BIGSERIAL PRIMARY KEY,
+                message TEXT NOT NULL,
+                created_at BIGINT NOT NULL,
+                created_by BIGINT REFERENCES players(id) ON DELETE SET NULL
+            )
+        """)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_game_notifications_created ON game_notifications(id DESC)")
+        db.execute("""
             CREATE TABLE IF NOT EXISTS builder_credentials (
                 creator_name TEXT PRIMARY KEY,
                 password_salt TEXT NOT NULL,
@@ -1582,18 +1591,40 @@ def register_fcm_token(
     return {"ok": True}
 
 
+@app.get("/api/notifications")
+def get_game_notifications():
+    """Return recent in-game notifications for the bell on every device."""
+    with connect() as db:
+        rows = db.execute(
+            "SELECT id, message, created_at FROM game_notifications ORDER BY id DESC LIMIT 50"
+        ).fetchall()
+    return {"notifications": [dict(row) for row in rows]}
+
+
 @app.post("/api/push/send")
 async def send_creator_push(
     data: PushMessageIn,
     authorization: str | None = Header(default=None),
     x_builder_token: str | None = Header(default=None)
 ):
+    message = data.message.strip()
+    if not message:
+        raise HTTPException(400, "متن اعلان خالی است.")
     with connect() as db:
-        require_builder(db, authorization, x_builder_token)
-    if not PUSH_ENABLED and not FCM_ENABLED:
-        raise HTTPException(503, "سرویس اعلان هنوز روی سرور تنظیم نشده است؛ کلید Firebase یا VAPID را وارد کنید.")
-    result = await asyncio.to_thread(send_push_to_offline, data.message.strip())
-    return {"ok": True, **result}
+        player = require_builder(db, authorization, x_builder_token)
+        now = int(time.time())
+        db.execute(
+            "INSERT INTO game_notifications(message, created_at, created_by) VALUES(?,?,?)",
+            (message, now, player["id"])
+        )
+    # In-game notification is stored regardless of whether phone push credentials are configured.
+    push_result = {"sent": 0, "targeted": 0, "push_available": bool(PUSH_ENABLED or FCM_ENABLED)}
+    if PUSH_ENABLED or FCM_ENABLED:
+        try:
+            push_result.update(await asyncio.to_thread(send_push_to_offline, message))
+        except Exception as exc:
+            push_result["push_error"] = str(exc)
+    return {"ok": True, "notification_saved": True, **push_result}
 
 
 @app.get("/api/announcement")
