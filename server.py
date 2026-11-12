@@ -209,6 +209,15 @@ def init_db():
         """)
         db.execute("ALTER TABLE game_announcement ADD COLUMN IF NOT EXISTS push_sent_at BIGINT")
         db.execute("""
+            CREATE TABLE IF NOT EXISTS inbox_announcements (
+                id BIGSERIAL PRIMARY KEY,
+                message TEXT NOT NULL,
+                created_at BIGINT NOT NULL,
+                created_by BIGINT REFERENCES players(id) ON DELETE SET NULL
+            )
+        """)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_inbox_announcements_created ON inbox_announcements(id DESC)")
+        db.execute("""
             CREATE TABLE IF NOT EXISTS builder_credentials (
                 creator_name TEXT PRIMARY KEY,
                 password_salt TEXT NOT NULL,
@@ -1588,12 +1597,35 @@ async def send_creator_push(
     authorization: str | None = Header(default=None),
     x_builder_token: str | None = Header(default=None)
 ):
+    message = data.message.strip()
     with connect() as db:
-        require_builder(db, authorization, x_builder_token)
-    if not PUSH_ENABLED and not FCM_ENABLED:
-        raise HTTPException(503, "سرویس اعلان هنوز روی سرور تنظیم نشده است؛ کلید Firebase یا VAPID را وارد کنید.")
-    result = await asyncio.to_thread(send_push_to_offline, data.message.strip())
-    return {"ok": True, **result}
+        player = require_builder(db, authorization, x_builder_token)
+        now = int(time.time())
+        cur = db.execute(
+            "INSERT INTO inbox_announcements(message, created_at, created_by) VALUES(?,?,?) RETURNING id",
+            (message, now, player["id"])
+        )
+        notice_id = cur.fetchone()["id"]
+
+    # The in-game inbox is saved even if no external push provider is configured.
+    if PUSH_ENABLED or FCM_ENABLED:
+        try:
+            result = await asyncio.to_thread(send_push_to_offline, message)
+        except Exception as exc:
+            result = {"targeted": 0, "sent": 0, "removed": 0, "push_error": str(exc)}
+    else:
+        result = {"targeted": 0, "sent": 0, "removed": 0, "push_configured": False}
+    return {"ok": True, "announcement_id": notice_id, **result}
+
+
+@app.get("/api/inbox/announcements")
+def get_inbox_announcements():
+    """Public global in-game inbox, separate from maintenance/update notices."""
+    with connect() as db:
+        rows = db.execute(
+            "SELECT id, message, created_at FROM inbox_announcements ORDER BY id DESC LIMIT 30"
+        ).fetchall()
+    return {"announcements": [dict(row) for row in rows]}
 
 
 @app.get("/api/announcement")
