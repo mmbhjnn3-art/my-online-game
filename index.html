@@ -380,8 +380,10 @@ body.immersive-camera #cameraExitBtn{display:block}
  </div>
 
  <div class="card">
-  <h2>⚙️ راهنما</h2>
+  <h2>⚙️ ذخیره و تنظیمات</h2>
   <button class="secondary full" id="cityGuideButton" type="button">🗺️ راهنمای شهر</button>
+  <button class="secondary full" id="enablePushButton" type="button" disabled aria-disabled="true">🔔 فعال‌سازی اعلان‌های خارج از بازی</button>
+  <div class="msg" id="pushStatus" aria-live="polite">🔔 اعلان‌ها هنوز در حال ساخت هستند.</div>
   <button class="danger full hidden" id="resetBtn" type="button" aria-hidden="true" tabindex="-1">ریست بازی</button>
   <div class="row"><button class="secondary" id="exportBtn">پشتیبان‌گیری</button><button class="secondary" id="importBtn">بازیابی پشتیبان</button></div>
   <input class="hidden" id="importFile" type="file" accept="application/json">
@@ -449,7 +451,32 @@ function decodeVapidKey(value){
  for(let i=0;i<raw.length;i++)output[i]=raw.charCodeAt(i);
  return output;
 }
-
+$("enablePushButton").addEventListener("click",async()=>{
+ const button=$("enablePushButton"),status=$("pushStatus");
+ if(button.disabled){status.textContent="🔔 اعلان‌ها هنوز در حال ساخت هستند.";return;}
+ if(!account||!authToken){status.textContent="ابتدا وارد حساب بازی شو.";return;}
+ if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window)){
+  status.textContent="این مرورگر از اعلان اینترنتی پشتیبانی نمی‌کند؛ بازی را در Chrome به‌روز باز کن.";return;
+ }
+ if(!window.isSecureContext){status.textContent="برای فعال‌سازی اعلان، بازی باید با آدرس امن HTTPS باز شود.";return;}
+ button.disabled=true;status.textContent="در حال فعال‌سازی اعلان‌ها...";
+ try{
+  const permission=await Notification.requestPermission();
+  if(permission!=="granted")throw new Error("اجازه اعلان از تنظیمات مرورگر داده نشد.");
+  const keyData=await api("/push/public-key");
+  if(!keyData.public_key)throw new Error("کلید اعلان روی سرور تنظیم نشده است.");
+  const registration=await navigator.serviceWorker.register("/sw.js",{scope:"/"});
+  await navigator.serviceWorker.ready;
+  let subscription=await registration.pushManager.getSubscription();
+  if(!subscription)subscription=await registration.pushManager.subscribe({
+   userVisibleOnly:true,applicationServerKey:decodeVapidKey(keyData.public_key)
+  });
+  await api("/push/subscribe",{subscription:subscription.toJSON()});
+  status.textContent="✓ اعلان‌های خارج از بازی برای این حساب فعال شد.";
+  button.textContent="✓ اعلان‌های خارج از بازی فعال است";
+ }catch(e){status.textContent=e.message||"فعال‌سازی اعلان انجام نشد.";}
+ finally{button.disabled=false;}
+});
 let dismissedAnnouncementId=null;
 try{dismissedAnnouncementId=localStorage.getItem("zendegi_dismissed_update_id");}catch(e){}
 function renderAnnouncement(){
