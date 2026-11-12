@@ -11,7 +11,6 @@
 :root{color-scheme:dark;--bg:#10251f;--panel:#19372e;--gold:#ffd166;--text:#f4f7f2;--muted:#b7c9bf;--green:#61d095;--red:#ff7777}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#244d3e,#0c1c18 72%);font-family:Tahoma,Arial,sans-serif;color:var(--text);min-height:100vh}
 .wrap{width:min(100%,560px);margin:auto;padding:14px 13px 38px}.brand{text-align:center;padding:13px 0 10px}.logo{font-size:38px}.brand h1{margin:5px 0;font-size:26px}.brand p{margin:0;color:var(--muted);font-size:12px}
-.top-actions{display:flex;align-items:center;justify-content:flex-start;gap:10px;min-height:48px;margin:0 0 2px}.auth-top-actions{display:flex;align-items:center;justify-content:flex-start;gap:10px;min-height:48px;margin:0 0 8px}.auth-top-actions #openGuideButton{flex:1}.announcement-list{max-height:55vh;overflow:auto}.announcement-list-item{padding:10px 0;border-bottom:1px solid #ffffff25;line-height:1.9;white-space:pre-wrap}.announcement-list-item:last-child{border-bottom:0}.announcement-list-time{display:block;color:#ffd166;font-size:11px;margin-top:4px}.announcement-bell{position:relative;width:48px;height:48px;padding:0;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#315c4b;color:#fff;border:1px solid #6b9b7e;font-size:25px;box-shadow:0 3px 10px #0003}.announcement-bell .bell-dot{position:absolute;top:5px;right:5px;width:11px;height:11px;border-radius:50%;background:#ff4545;border:2px solid #315c4b}.announcement-bell:focus-visible{outline:3px solid var(--gold);outline-offset:2px}.announcement-popup{position:fixed;inset:0;z-index:160;background:#0009;display:flex;align-items:center;justify-content:center;padding:18px}.announcement-popup-card{width:min(100%,430px);background:#174537;color:#fff;border:1px solid #6b9b7e;border-radius:18px;padding:20px;box-shadow:0 12px 36px #0008}.announcement-popup-card h2{margin:0 0 14px}.announcement-popup-card p{white-space:pre-wrap;line-height:1.9;margin:0 0 16px}
 .card{background:linear-gradient(145deg,#21483b,#162f27);border:1px solid #376553;border-radius:19px;padding:16px;margin:11px 0;box-shadow:0 10px 30px #0003}
 h2{font-size:18px;margin:0 0 13px}.field{margin:11px 0}.field label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
 input,textarea{width:100%;border:1px solid #557968;border-radius:11px;background:#f4f7f2;color:#111;padding:13px;font-size:16px;outline:none;font-family:inherit}textarea{resize:vertical;min-height:86px}input:focus,textarea:focus{border-color:var(--gold)}
@@ -231,16 +230,11 @@ body.immersive-camera #cameraExitBtn{display:block}
 <div id="waterGuideHint" class="water-guide-hint hidden" role="status" aria-live="polite">
  <span id="waterGuideHintText"></span><button id="waterGuideClose" type="button">بستن</button>
 </div>
-<div id="announcementPopup" class="announcement-popup hidden" role="dialog" aria-modal="true" aria-labelledby="announcementPopupTitle">
- <div class="announcement-popup-card"><h2 id="announcementPopupTitle">🔔 اعلان‌های بازی</h2><div id="announcementPopupMessage" class="announcement-list"><p>در حال دریافت اعلان‌ها...</p></div><button type="button" id="closeAnnouncementPopup" class="primary full">بستن</button></div>
-</div>
 <div class="wrap">
 <header class="brand"><div class="logo">🌿🏡</div><h1>بازی زندگی ۳</h1><p>زندگی خودت را بساز؛ خرید کن و پیشرفت کن</p></header>
-<div class="auth-top-actions">
- <button type="button" id="openGuideButton" class="secondary" aria-label="باز کردن راهنمای بازی">❓ راهنمای بازی</button>
- <button type="button" id="announcementBellButton" class="announcement-bell" aria-label="نمایش اعلان‌ها" title="اعلان‌ها">🔔<span id="announcementBellDot" class="bell-dot hidden"></span></button>
-</div>
+
 <section id="auth">
+ <button type="button" id="openGuideButton" class="secondary" aria-label="باز کردن راهنمای بازی">❓ راهنمای بازی</button>
  <div id="authAnnouncement" class="card hidden" style="border:2px solid var(--gold);text-align:center"><h2>📢 اطلاعیه بروزرسانی</h2><div class="announcement-text"></div><div class="announcement-countdown" style="font-size:22px;color:var(--gold);font-weight:bold;margin-top:10px"></div></div>
  <div class="card">
   <h2>🌐 انتخاب سرور</h2>
@@ -259,13 +253,12 @@ body.immersive-camera #cameraExitBtn{display:block}
   <button class="primary" id="registerBtn">ثبت نام و شروع زندگی</button><div class="msg" id="regMsg"></div>
  </div>
  <div class="card">
-  <h2>🔑 ورود قبلی</h2>
-  <div class="field"><label for="loginName">نام حساب قبلی</label><input id="loginName" maxlength="24" autocomplete="username" placeholder="نام حساب خود را وارد کن"></div>
+  <h2>🔑 ادامه بازی</h2>
+  <div class="field"><label for="loginName">نام</label><input id="loginName" maxlength="24" autocomplete="username" placeholder="نام حساب"></div>
   <div class="field"><label for="loginPass">رمز عبور</label><input id="loginPass" type="password" maxlength="64" autocomplete="current-password" placeholder="رمز عبور"></div>
   <button class="secondary full" id="loginBtn">ورود و ادامه بازی</button><div class="msg" id="loginMsg"></div>
-  <p class="notice">فقط این بار نام و رمز را وارد کن؛ بعد از ورود موفق، بازی دفعه‌های بعد خودکار وارد همین حساب می‌شود.</p>
  </div>
- <p class="notice">برای ساخت حساب تازه، از بخش «ثبت نام جدید» استفاده کن.</p>
+ <p class="notice">حساب کاربری در همه سرورها مشترک است؛ با همان نام و رمز وارد هر سروری شو.</p>
 </section>
 
 <section id="game" class="hidden">
@@ -415,8 +408,6 @@ let wellState={stock:100,last_regen_at:0};
 let syncTimer=null,wellTimer=null;
 let realtimeSocket=null, realtimeSendTimer=null, realtimePingTimer=null, realtimeReconnectTimer=null, realtimeRetryCount=0, realtimeLastPong=0;
 let currentAnnouncement=null, announcementPollTimer=null, announcementClockTimer=null, lastAnnouncementId=null;
-let inboxAnnouncements=[], dismissedInboxAnnouncementId=null;
-try{dismissedInboxAnnouncementId=localStorage.getItem("zendegi_dismissed_inbox_announcement_id");}catch(e){}
 async function api(path,body,extraHeaders={}){
  const controller=new AbortController();
  const timeout=setTimeout(()=>controller.abort(),20000);
@@ -514,51 +505,15 @@ function dismissUpdateScreen(){
  if(!currentAnnouncement)return;
  dismissedAnnouncementId=String(currentAnnouncement.id);
  try{localStorage.setItem("zendegi_dismissed_update_id",dismissedAnnouncementId);}catch(e){}
- updateAnnouncementBell();
  $("updateScreen").classList.add("hidden");
  if(account){switchTab("home");if($("game").classList.contains("hidden"))showGame();}
 }
 $("runGameButton").addEventListener("click",dismissUpdateScreen);
-function updateAnnouncementBell(){
- const dot=$("announcementBellDot");
- const latest=inboxAnnouncements.length?String(inboxAnnouncements[0].id):"";
- if(dot)dot.classList.toggle("hidden",!latest||latest===String(dismissedInboxAnnouncementId||""));
-}
-function renderInboxAnnouncements(){
- const box=$("announcementPopupMessage");
- if(!box)return;
- if(!inboxAnnouncements.length){box.innerHTML="<p>فعلاً اعلان جدیدی وجود ندارد.</p>";return;}
- box.innerHTML=inboxAnnouncements.map(item=>{
-  const date=item.created_at?new Date(Number(item.created_at)*1000).toLocaleString("fa-IR"):"";
-  return `<div class="announcement-list-item">${escapeAdminText(item.message)}<span class="announcement-list-time">${escapeAdminText(date)}</span></div>`;
- }).join("");
-}
-async function refreshInboxAnnouncements(){
- try{
-  const data=await api("/inbox/announcements");
-  inboxAnnouncements=Array.isArray(data.announcements)?data.announcements:[];
-  renderInboxAnnouncements();
-  updateAnnouncementBell();
- }catch(e){/* در قطع ارتباط، اعلان‌های قبلی روی صفحه حفظ می‌شوند. */}
-}
-function openAnnouncementPopup(){
- renderInboxAnnouncements();
- $("announcementPopup").classList.remove("hidden");
- if(inboxAnnouncements.length){
-  dismissedInboxAnnouncementId=String(inboxAnnouncements[0].id);
-  try{localStorage.setItem("zendegi_dismissed_inbox_announcement_id",dismissedInboxAnnouncementId);}catch(e){}
- }
- updateAnnouncementBell();
-}
-$("announcementBellButton").addEventListener("click",openAnnouncementPopup);
-$("closeAnnouncementPopup").addEventListener("click",()=>$("announcementPopup").classList.add("hidden"));
-$("announcementPopup").addEventListener("click",e=>{if(e.target===$("announcementPopup"))$("announcementPopup").classList.add("hidden")});
 function receiveAnnouncement(data){
  const next=data&&data.active?data.announcement:null;
  const nextId=next?String(next.id):null;
  const isNew=!!next&&nextId!==lastAnnouncementId;
  currentAnnouncement=next;lastAnnouncementId=nextId;
- updateAnnouncementBell();
  if(isNew&&account){
   if($("game").classList.contains("hidden"))showGame();
   switchTab("home");window.scrollTo({top:0,behavior:"smooth"});
@@ -570,10 +525,9 @@ async function refreshAnnouncement(){
 }
 function startAnnouncementPolling(){
  refreshAnnouncement();
- refreshInboxAnnouncements();
  if(announcementPollTimer)clearInterval(announcementPollTimer);
  if(announcementClockTimer)clearInterval(announcementClockTimer);
- announcementPollTimer=setInterval(()=>{refreshAnnouncement();refreshInboxAnnouncements();},5000);
+ announcementPollTimer=setInterval(refreshAnnouncement,5000);
  announcementClockTimer=setInterval(renderAnnouncement,1000);
 }
 async function refreshServerStatus(){
@@ -625,20 +579,6 @@ function writeAll(d){
  if(window.AppInventor && typeof window.AppInventor.setWebViewString==="function"){
   try{window.AppInventor.setWebViewString(raw);}catch(e){}
  }
-}
-// توکن ورود به‌صورت محلی و در TinyDB (از مسیر WebViewString) نگهداری می‌شود.
-function authMeta(){
- const all=readAll();all.__meta=all.__meta||{};all.__meta.authTokens=all.__meta.authTokens||{};
- return all;
-}
-function rememberAuth(nameKey,token,serverId){
- const all=authMeta();all.__meta.authTokens[nameKey]={token,server_id:String(serverId||"1")};
- all.__meta.selectedAccountKey=nameKey;writeAll(all);
-}
-function forgetAuth(nameKey){
- const all=authMeta();if(all.__meta.authTokens)delete all.__meta.authTokens[nameKey];
- if(all.__meta.selectedAccountKey===nameKey)delete all.__meta.selectedAccountKey;
- writeAll(all);
 }
 async function hash(s){
  if(window.crypto&&crypto.subtle){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("")}
@@ -2004,7 +1944,6 @@ $("registerBtn").onclick=async()=>{
   selectedServer=$("serverSelect").value;
   const d=await api("/register",{name,age,password:pass,server_id:Number(selectedServer)});
   authToken=d.token;registeredAppInventorFcmToken="";account=d.state;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";account.nameKey=String(account.name||name).trim().replace(/\s+/g," ").toLocaleLowerCase();account.lastActiveAt=Date.now();
-  rememberAuth(account.nameKey,authToken,account.server_id);
   log("شروع زندگی در سرور "+selectedServer);save();showGame();
  }catch(e){$("regMsg").textContent=e.message}
 };
@@ -2024,26 +1963,20 @@ function showLoginLock(seconds){
 }
 $("loginBtn").onclick=async()=>{
  const name=$("loginName").value.trim(),pass=$("loginPass").value;
- $("loginMsg").textContent="";
- if(!name||!pass){$("loginMsg").textContent="نام و رمز را وارد کن.";return;}
+ $("loginMsg").textContent="";if(!name||!pass){$("loginMsg").textContent="نام و رمز را وارد کن.";return}
  try{
   selectedServer=$("serverSelect").value;
   const d=await api("/login",{name,password:pass,server_id:Number(selectedServer)});
-  authToken=d.token;registeredAppInventorFcmToken="";account=d.state;
-  account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";
-  account.nameKey=String(account.name||name).trim().replace(/\\s+/g," ").toLocaleLowerCase();
-  rememberAuth(account.nameKey,authToken,account.server_id);
-  account.lastActiveAt=null;
+  authToken=d.token;registeredAppInventorFcmToken="";account=d.state;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";account.nameKey=String(account.name||name).trim().replace(/\s+/g," ").toLocaleLowerCase();account.lastActiveAt=null;
   account.inventory=account.inventory||{};account.journal=account.journal||[];account.xp=account.xp||0;
-  account.playerX=Math.max(-CITY_HALF,Math.min(CITY_HALF,Number.isFinite(account.playerX)?account.playerX:0));
-  account.playerY=Math.max(-CITY_HALF,Math.min(CITY_HALF,Number.isFinite(account.playerY)?account.playerY:0));
-  account.cameraX=Number.isFinite(account.cameraX)?account.cameraX:0;
-  account.cameraY=Number.isFinite(account.cameraY)?account.cameraY:0;
-  account.guideDone=true;markGuideDone();closeGuide();
-  $("loginPass").value="";
+  account.playerX=Math.max(-CITY_HALF,Math.min(CITY_HALF,Number.isFinite(account.playerX)?account.playerX:0));account.playerY=Math.max(-CITY_HALF,Math.min(CITY_HALF,Number.isFinite(account.playerY)?account.playerY:0));
+  account.cameraX=Number.isFinite(account.cameraX)?account.cameraX:0;account.cameraY=Number.isFinite(account.cameraY)?account.cameraY:0;
+  account.guideDone=true;
+  markGuideDone();
+  closeGuide();
   render();showGame();
  }catch(e){
-  const match=String(e.message).match(/^LOCKED:(\\d+)$/);
+  const match=String(e.message).match(/^LOCKED:(\d+)$/);
   if(match)showLoginLock(Number(match[1]));
   else $("loginMsg").textContent=e.message;
  }
@@ -2074,9 +2007,8 @@ $("sendCreatorPushButton").onclick=async()=>{
  $("creatorPushStatus").textContent="در حال ارسال اعلان...";
  try{
   const d=await api("/push/send",{message},{"X-Builder-Token":builderToken});
-  $("creatorPushStatus").textContent=`اعلان ذخیره شد و ارسال گوشی: ${d.sent} دستگاه از ${d.targeted} دستگاه هدف.`;
+  $("creatorPushStatus").textContent=`اعلان ارسال شد؛ ${d.sent} دستگاه دریافت کرد.`;
   $("creatorPushMessage").value="";
-  await refreshInboxAnnouncements();
  }catch(e){$("creatorPushStatus").textContent=e.message;}
  finally{button.disabled=false;}
 };
@@ -2272,9 +2204,10 @@ const guideDefinitions={
   {id:"registerBtn",title:"ثبت‌نام",text:"وقتی سرور، نام، سن و رمز را وارد کردی، روی دکمه «ثبت نام و شروع زندگی» بزن. بعد از ثبت‌نام و ورود به بازی، راهنما تمام می‌شود.",last:true}
  ],
  login:[
-  {id:"loginName",title:"نام حساب",text:"نام حساب قبلی خودت را وارد کن."},
-  {id:"loginPass",title:"رمز عبور",text:"رمز همان حساب را وارد کن."},
-  {id:"loginBtn",title:"ورود به حساب",text:"روی ورود بزن. بعد از ورود موفق، دفعات بعد بازی خودکار وارد همین حساب می‌شود.",last:true}
+  {id:"serverSelect",title:"انتخاب سرور",text:"اول سروری را انتخاب کن که می‌خواهی بازی را در آن ادامه بدهی. حساب تو در همه سرورها مشترک است."},
+  {id:"loginName",title:"نام حساب",text:"نامی را که هنگام ثبت‌نام انتخاب کرده بودی اینجا وارد کن."},
+  {id:"loginPass",title:"رمز عبور",text:"رمز همان حساب را وارد کن. رمزت را در اختیار دیگران نگذار."},
+  {id:"loginBtn",title:"ادامه بازی",text:"حالا روی «ورود و ادامه بازی» بزن تا بازی قبلی‌ات بارگذاری شود.",last:true}
  ]
 };
 function clearGuideTarget(){if(guideTarget){guideTarget.classList.remove("guideTarget");guideTarget=null;}}
@@ -2308,25 +2241,6 @@ $("cityGuideShade").addEventListener("click",e=>{if(e.target.id==="cityGuideShad
 guideClose.addEventListener("click",closeGuide);
 guideNext.addEventListener("click",()=>{if(guideMode==="menu")return;if(guideIndex<guideSteps.length-1){guideIndex++;showGuideStep();}else closeGuide();});
 guideMenu.querySelectorAll("[data-guide]").forEach(btn=>btn.addEventListener("click",()=>startGuide(btn.dataset.guide)));
-// بازیابی خودکار حساب انتخاب‌شده؛ در صورت داشتن توکن معتبر، صفحه ثبت‌نام نمایش داده نمی‌شود.
-async function restoreRememberedAccount(){
- const all=authMeta(),key=all.__meta.selectedAccountKey;
- const saved=key&&all.__meta.authTokens&&all.__meta.authTokens[key];
- if(!saved||!saved.token)return;
- authToken=saved.token;
- try{
-  const d=await api("/me");
-  account=d.state;account.name=d.name||account.name;account.server_id=String(d.server_id||saved.server_id||"1");account.server_name=d.server_name||"";
-  account.nameKey=String(account.name||key).trim().replace(/\s+/g," ").toLocaleLowerCase();
-  account.lastActiveAt=null;account.inventory=account.inventory||{};account.journal=account.journal||[];account.xp=account.xp||0;
-  selectedServer=account.server_id;$("serverSelect").value=selectedServer;
-  render();showGame();
- }catch(e){
-  authToken=null;forgetAuth(key);
-  $("loginMsg").textContent="برای ورود به حساب قبلی، نام و رمز خودت را وارد کن.";
- }
-}
-restoreRememberedAccount();
 // راهنمای ثبت‌نام/ورود/انتخاب سرور همیشه دستی است؛ فقط آموزش آب برای حساب تازه‌ثبت‌نام‌شده یک‌بار خودکار اجرا می‌شود.
 
 })();
