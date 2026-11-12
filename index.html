@@ -126,9 +126,32 @@ body.immersive-camera #cameraExitBtn{display:block}
 <style id="hide-obsolete-push-controls">
 #enablePushButton, #pushStatus { display: none !important; }
 </style>
+<style id="game-announcement-bell-style">
+.auth-top-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 10px}
+.bell-button{position:relative;min-width:54px;min-height:48px;font-size:23px;display:flex;align-items:center;justify-content:center}
+.bell-dot{position:absolute;top:5px;right:6px;width:10px;height:10px;border-radius:50%;background:#ff4d4f;border:2px solid #315c4b}
+.announcements-modal{position:fixed;inset:0;z-index:100020;background:#000b;display:flex;align-items:center;justify-content:center;padding:18px}
+.announcements-modal.hidden{display:none!important}
+.announcements-window{width:min(100%,440px);max-height:80vh;overflow:auto;background:linear-gradient(145deg,#21483b,#162f27);border:1px solid #6b9b7e;border-radius:19px;padding:16px;box-shadow:0 18px 55px #0009}
+.announcements-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.announcements-head h2{margin:0;color:#ffd166}
+.announcements-close{padding:8px 12px}
+.announcements-content{white-space:pre-wrap;overflow-wrap:anywhere;line-height:2;color:#f4f7f2;background:#10271f;border:1px solid #416b57;border-radius:13px;padding:14px;min-height:75px}
+.announcement-empty{text-align:center;color:#b7c9bf}
+</style>
 </head>
 <body>
 
+
+<div id="announcementsModal" class="announcements-modal hidden" role="dialog" aria-modal="true" aria-labelledby="announcementsTitle">
+ <div class="announcements-window">
+  <div class="announcements-head">
+   <h2 id="announcementsTitle">🔔 اعلان‌های بازی</h2>
+   <button type="button" id="closeAnnouncementsButton" class="secondary announcements-close" aria-label="بستن">✕</button>
+  </div>
+  <div id="announcementsContent" class="announcements-content">در حال دریافت اعلان‌ها...</div>
+ </div>
+</div>
 
 <div id="offlineScreen" role="alert" aria-live="assertive">
  <div class="offline-box">
@@ -234,7 +257,10 @@ body.immersive-camera #cameraExitBtn{display:block}
 <header class="brand"><div class="logo">🌿🏡</div><h1>بازی زندگی ۳</h1><p>زندگی خودت را بساز؛ خرید کن و پیشرفت کن</p></header>
 
 <section id="auth">
- <button type="button" id="openGuideButton" class="secondary" aria-label="باز کردن راهنمای بازی">❓ راهنمای بازی</button>
+ <div class="auth-top-actions">
+  <button type="button" id="openAnnouncementsButton" class="secondary bell-button" aria-label="مشاهده اعلان‌ها" title="اعلان‌ها">🔔<span id="announcementBellDot" class="bell-dot hidden"></span></button>
+  <button type="button" id="openGuideButton" class="secondary" aria-label="باز کردن راهنمای بازی">❓ راهنمای بازی</button>
+ </div>
  <div id="authAnnouncement" class="card hidden" style="border:2px solid var(--gold);text-align:center"><h2>📢 اطلاعیه بروزرسانی</h2><div class="announcement-text"></div><div class="announcement-countdown" style="font-size:22px;color:var(--gold);font-weight:bold;margin-top:10px"></div></div>
  <div class="card">
   <h2>🌐 انتخاب سرور</h2>
@@ -485,6 +511,7 @@ $("enablePushButton").addEventListener("click",async()=>{
 let dismissedAnnouncementId=null;
 try{dismissedAnnouncementId=localStorage.getItem("zendegi_dismissed_update_id");}catch(e){}
 function renderAnnouncement(){
+ renderAnnouncementBell();
  const overlay=$("updateScreen");
  if(!overlay)return;
  const hasAnnouncement=!!currentAnnouncement&&!!currentAnnouncement.id;
@@ -521,6 +548,43 @@ function receiveAnnouncement(data){
  }
  renderAnnouncement();
 }
+function renderAnnouncementBell(){
+ const dot=$("announcementBellDot");
+ if(dot)dot.classList.toggle("hidden",!currentAnnouncement);
+}
+function openAnnouncements(){
+ const modal=$("announcementsModal"),content=$("announcementsContent");
+ if(!modal||!content)return;
+ modal.classList.remove("hidden");
+ function draw(){
+  content.textContent="";
+  if(!currentAnnouncement||!currentAnnouncement.message){
+   const empty=document.createElement("div");
+   empty.className="announcement-empty";
+   empty.textContent="هنوز اعلانی برای بازی ثبت نشده است.";
+   content.appendChild(empty);
+   return;
+  }
+  const message=document.createElement("div");
+  message.textContent=currentAnnouncement.message;
+  content.appendChild(message);
+  const stamp=Number(currentAnnouncement.starts_at||0);
+  if(stamp>0){
+   const time=document.createElement("div");
+   time.style.cssText="margin-top:12px;padding-top:8px;border-top:1px solid #ffffff22;color:#b7c9bf;font-size:11px";
+   time.textContent="زمان ارسال: "+new Date(stamp*1000).toLocaleString("fa-IR");
+   content.appendChild(time);
+  }
+ }
+ draw();
+ refreshAnnouncement().then(draw).catch(()=>{});
+}
+$("openAnnouncementsButton").addEventListener("click",openAnnouncements);
+$("closeAnnouncementsButton").addEventListener("click",()=>$("announcementsModal").classList.add("hidden"));
+$("announcementsModal").addEventListener("click",e=>{
+ if(e.target===$("announcementsModal"))$("announcementsModal").classList.add("hidden");
+});
+
 async function refreshAnnouncement(){
  try{const d=await api("/announcement");receiveAnnouncement(d);}catch(e){}
 }
