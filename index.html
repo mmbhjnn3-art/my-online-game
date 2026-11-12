@@ -252,13 +252,18 @@ body.immersive-camera #cameraExitBtn{display:block}
   <div class="field"><label for="regPass">رمز عبور</label><input id="regPass" type="password" maxlength="64" autocomplete="new-password" placeholder="حداقل ۴ حرف یا عدد"></div>
   <button class="primary" id="registerBtn">ثبت نام و شروع زندگی</button><div class="msg" id="regMsg"></div>
  </div>
- <div class="card">
-  <h2>🔑 ادامه بازی</h2>
-  <div class="field"><label for="loginName">نام</label><input id="loginName" maxlength="24" autocomplete="username" placeholder="نام حساب"></div>
-  <div class="field"><label for="loginPass">رمز عبور</label><input id="loginPass" type="password" maxlength="64" autocomplete="current-password" placeholder="رمز عبور"></div>
-  <button class="secondary full" id="loginBtn">ورود و ادامه بازی</button><div class="msg" id="loginMsg"></div>
+ <div class="card" id="savedAccountsCard">
+  <h2>👤 حساب‌های قبلی</h2>
+  <div class="field"><label for="savedAccountSelect">حسابی که قبلاً با این دستگاه بازی کرده‌ای</label>
+   <select id="savedAccountSelect" style="width:100%;border:1px solid #557968;border-radius:11px;background:#f4f7f2;color:#111;padding:13px;font-size:16px"></select>
+  </div>
+  <div id="legacyAccountLogin" class="hidden">
+   <div class="field"><label for="loginPass">برای اتصال اولیه، رمز همین حساب را یک‌بار وارد کن</label><input id="loginPass" type="password" maxlength="64" autocomplete="current-password" placeholder="رمز عبور"></div>
+  </div>
+  <button class="secondary full" id="loginBtn">ورود به حساب انتخاب‌شده</button><div class="msg" id="loginMsg"></div>
+  <p class="notice" id="savedAccountsHint">بعد از انتخاب و اتصال حساب، دفعات بعد خودکار وارد همین حساب می‌شوی.</p>
  </div>
- <p class="notice">حساب کاربری در همه سرورها مشترک است؛ با همان نام و رمز وارد هر سروری شو.</p>
+ <p class="notice">برای ساخت حساب تازه، از بخش «ثبت نام جدید» استفاده کن.</p>
 </section>
 
 <section id="game" class="hidden">
@@ -580,6 +585,50 @@ function writeAll(d){
   try{window.AppInventor.setWebViewString(raw);}catch(e){}
  }
 }
+// توکن ورود به‌صورت محلی و در TinyDB (از مسیر WebViewString) نگهداری می‌شود.
+function authMeta(){
+ const all=readAll();all.__meta=all.__meta||{};all.__meta.authTokens=all.__meta.authTokens||{};
+ return all;
+}
+function rememberAuth(nameKey,token,serverId){
+ const all=authMeta();all.__meta.authTokens[nameKey]={token,server_id:String(serverId||"1")};
+ all.__meta.selectedAccountKey=nameKey;writeAll(all);
+}
+function forgetAuth(nameKey){
+ const all=authMeta();if(all.__meta.authTokens)delete all.__meta.authTokens[nameKey];
+ if(all.__meta.selectedAccountKey===nameKey)delete all.__meta.selectedAccountKey;
+ writeAll(all);
+}
+function savedAccountEntries(){
+ const all=readAll();
+ return Object.entries(all).filter(([key,value])=>key!=="__meta"&&value&&typeof value==="object"&&value.name)
+  .map(([key,value])=>({key,name:value.name,server_id:String(value.server_id||"1"),value}));
+}
+function refreshSavedAccountPicker(){
+ const select=$("savedAccountSelect"),entries=savedAccountEntries(),meta=authMeta().__meta;
+ if(!select)return;
+ select.innerHTML="";
+ entries.forEach(entry=>{const option=document.createElement("option");option.value=entry.key;option.textContent=entry.name;select.appendChild(option);});
+ if(!entries.length){
+  const option=document.createElement("option");option.value="";option.textContent="هنوز حساب ذخیره‌شده‌ای در این دستگاه نیست";select.appendChild(option);
+  select.disabled=false;
+  $("loginBtn").disabled=true;$("savedAccountsHint").textContent="اگر قبلاً روی همین دستگاه بازی کرده‌ای ولی حسابی دیده نمی‌شود، یک‌بار اطلاعات حساب را بازیابی کن.";
+ }else{
+  const preferred=meta.selectedAccountKey&&entries.some(x=>x.key===meta.selectedAccountKey)?meta.selectedAccountKey:entries[0].key;
+  select.value=preferred;$("loginBtn").disabled=false;
+  const entry=entries.find(x=>x.key===preferred),saved=meta.authTokens&&meta.authTokens[preferred];
+  select.disabled=!!(saved&&saved.token);
+  $("legacyAccountLogin").classList.toggle("hidden",!!(saved&&saved.token));
+  $("savedAccountsHint").textContent=saved&&saved.token?"این حساب روی این دستگاه به خاطر سپرده شده و ورود بعدی خودکار است.":"برای حساب‌های قدیمی که قبلاً توکن ورودشان ذخیره نشده، فقط همین یک‌بار رمز لازم است.";
+ }
+}
+$("savedAccountSelect").addEventListener("change",()=>{
+ const key=$("savedAccountSelect").value,all=authMeta();all.__meta.selectedAccountKey=key;writeAll(all);
+ const saved=all.__meta.authTokens&&all.__meta.authTokens[key];
+ $("legacyAccountLogin").classList.toggle("hidden",!!(saved&&saved.token));
+ $("loginMsg").textContent="";
+});
+
 async function hash(s){
  if(window.crypto&&crypto.subtle){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("")}
  return "plain:"+s;
@@ -1944,6 +1993,7 @@ $("registerBtn").onclick=async()=>{
   selectedServer=$("serverSelect").value;
   const d=await api("/register",{name,age,password:pass,server_id:Number(selectedServer)});
   authToken=d.token;registeredAppInventorFcmToken="";account=d.state;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";account.nameKey=String(account.name||name).trim().replace(/\s+/g," ").toLocaleLowerCase();account.lastActiveAt=Date.now();
+  rememberAuth(account.nameKey,authToken,account.server_id);refreshSavedAccountPicker();
   log("شروع زندگی در سرور "+selectedServer);save();showGame();
  }catch(e){$("regMsg").textContent=e.message}
 };
@@ -1962,19 +2012,34 @@ function showLoginLock(seconds){
  update();loginCountdownTimer=setInterval(update,1000);
 }
 $("loginBtn").onclick=async()=>{
- const name=$("loginName").value.trim(),pass=$("loginPass").value;
- $("loginMsg").textContent="";if(!name||!pass){$("loginMsg").textContent="نام و رمز را وارد کن.";return}
+ const key=$("savedAccountSelect").value,entry=savedAccountEntries().find(x=>x.key===key);
+ $("loginMsg").textContent="";
+ if(!entry){$("loginMsg").textContent="حساب ذخیره‌شده‌ای برای انتخاب وجود ندارد.";return;}
+ const all=authMeta(),saved=all.__meta.authTokens[key];
+ selectedServer=String((saved&&saved.server_id)||entry.server_id||"1");
+ $("serverSelect").value=selectedServer;
  try{
-  selectedServer=$("serverSelect").value;
-  const d=await api("/login",{name,password:pass,server_id:Number(selectedServer)});
-  authToken=d.token;registeredAppInventorFcmToken="";account=d.state;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";account.nameKey=String(account.name||name).trim().replace(/\s+/g," ").toLocaleLowerCase();account.lastActiveAt=null;
+  let d;
+  if(saved&&saved.token){
+   authToken=saved.token;
+   try{d=await api("/me");}
+   catch(e){forgetAuth(key);authToken=null;refreshSavedAccountPicker();throw new Error("ورود خودکار این حساب منقضی شده است؛ رمز حساب را یک‌بار وارد کن و دوباره بزن.");}
+   account=d.state;account.name=d.name||entry.name;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";
+  }else{
+   const pass=$("loginPass").value;
+   if(!pass){$("legacyAccountLogin").classList.remove("hidden");$("loginMsg").textContent="برای اتصال اولیه حساب قدیمی، رمز را یک‌بار وارد کن.";return;}
+   d=await api("/login",{name:entry.name,password:pass,server_id:Number(selectedServer)});
+   authToken=d.token;account=d.state;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";
+  }
+  registeredAppInventorFcmToken="";
+  account.nameKey=String(account.name||entry.name).trim().replace(/\s+/g," ").toLocaleLowerCase();
+  rememberAuth(account.nameKey,authToken,account.server_id);
+  account.lastActiveAt=null;
   account.inventory=account.inventory||{};account.journal=account.journal||[];account.xp=account.xp||0;
   account.playerX=Math.max(-CITY_HALF,Math.min(CITY_HALF,Number.isFinite(account.playerX)?account.playerX:0));account.playerY=Math.max(-CITY_HALF,Math.min(CITY_HALF,Number.isFinite(account.playerY)?account.playerY:0));
   account.cameraX=Number.isFinite(account.cameraX)?account.cameraX:0;account.cameraY=Number.isFinite(account.cameraY)?account.cameraY:0;
-  account.guideDone=true;
-  markGuideDone();
-  closeGuide();
-  render();showGame();
+  account.guideDone=true;markGuideDone();closeGuide();
+  $("loginPass").value="";refreshSavedAccountPicker();render();showGame();
  }catch(e){
   const match=String(e.message).match(/^LOCKED:(\d+)$/);
   if(match)showLoginLock(Number(match[1]));
@@ -2204,10 +2269,9 @@ const guideDefinitions={
   {id:"registerBtn",title:"ثبت‌نام",text:"وقتی سرور، نام، سن و رمز را وارد کردی، روی دکمه «ثبت نام و شروع زندگی» بزن. بعد از ثبت‌نام و ورود به بازی، راهنما تمام می‌شود.",last:true}
  ],
  login:[
-  {id:"serverSelect",title:"انتخاب سرور",text:"اول سروری را انتخاب کن که می‌خواهی بازی را در آن ادامه بدهی. حساب تو در همه سرورها مشترک است."},
-  {id:"loginName",title:"نام حساب",text:"نامی را که هنگام ثبت‌نام انتخاب کرده بودی اینجا وارد کن."},
-  {id:"loginPass",title:"رمز عبور",text:"رمز همان حساب را وارد کن. رمزت را در اختیار دیگران نگذار."},
-  {id:"loginBtn",title:"ادامه بازی",text:"حالا روی «ورود و ادامه بازی» بزن تا بازی قبلی‌ات بارگذاری شود.",last:true}
+  {id:"savedAccountSelect",title:"انتخاب حساب",text:"حساب قبلی خودت را از فهرست حساب‌هایی که روی این دستگاه ذخیره شده انتخاب کن."},
+  {id:"loginPass",title:"اتصال اولیه",text:"اگر این حساب قدیمی است و هنوز به این دستگاه متصل نشده، رمز آن را فقط یک‌بار وارد کن."},
+  {id:"loginBtn",title:"ورود به حساب",text:"بعد از اتصال اولیه، دفعات بعد بازی خودکار وارد همین حساب می‌شود.",last:true}
  ]
 };
 function clearGuideTarget(){if(guideTarget){guideTarget.classList.remove("guideTarget");guideTarget=null;}}
@@ -2241,6 +2305,26 @@ $("cityGuideShade").addEventListener("click",e=>{if(e.target.id==="cityGuideShad
 guideClose.addEventListener("click",closeGuide);
 guideNext.addEventListener("click",()=>{if(guideMode==="menu")return;if(guideIndex<guideSteps.length-1){guideIndex++;showGuideStep();}else closeGuide();});
 guideMenu.querySelectorAll("[data-guide]").forEach(btn=>btn.addEventListener("click",()=>startGuide(btn.dataset.guide)));
+// بازیابی خودکار حساب انتخاب‌شده؛ در صورت داشتن توکن معتبر، صفحه ثبت‌نام نمایش داده نمی‌شود.
+async function restoreRememberedAccount(){
+ refreshSavedAccountPicker();
+ const all=authMeta(),key=all.__meta.selectedAccountKey;
+ const saved=key&&all.__meta.authTokens&&all.__meta.authTokens[key];
+ if(!saved||!saved.token)return;
+ authToken=saved.token;
+ try{
+  const d=await api("/me");
+  account=d.state;account.name=d.name||account.name;account.server_id=String(d.server_id||saved.server_id||"1");account.server_name=d.server_name||"";
+  account.nameKey=String(account.name||key).trim().replace(/\s+/g," ").toLocaleLowerCase();
+  account.lastActiveAt=null;account.inventory=account.inventory||{};account.journal=account.journal||[];account.xp=account.xp||0;
+  selectedServer=account.server_id;$("serverSelect").value=selectedServer;
+  render();showGame();
+ }catch(e){
+  authToken=null;forgetAuth(key);refreshSavedAccountPicker();
+  $("loginMsg").textContent="برای ادامه حساب قبلی، آن را انتخاب کن و رمز را یک‌بار وارد کن.";
+ }
+}
+restoreRememberedAccount();
 // راهنمای ثبت‌نام/ورود/انتخاب سرور همیشه دستی است؛ فقط آموزش آب برای حساب تازه‌ثبت‌نام‌شده یک‌بار خودکار اجرا می‌شود.
 
 })();
