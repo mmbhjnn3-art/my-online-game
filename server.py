@@ -207,6 +207,8 @@ def init_db():
             )
         """)
         db.execute("CREATE INDEX IF NOT EXISTS idx_bus_stops_server ON bus_stops(server_id, id)")
+        db.execute("ALTER TABLE bus_stops ADD COLUMN IF NOT EXISTS scale DOUBLE PRECISION NOT NULL DEFAULT 1")
+        db.execute("ALTER TABLE bus_stops ADD COLUMN IF NOT EXISTS rotation DOUBLE PRECISION NOT NULL DEFAULT 0")
         db.execute("""
             CREATE TABLE IF NOT EXISTS land_plots (
                 id BIGSERIAL PRIMARY KEY,
@@ -532,6 +534,8 @@ class MapMarkerDeleteIn(BaseModel):
 class BusStopCreateIn(BaseModel):
     x: float = Field(ge=-CITY_LIMIT, le=CITY_LIMIT)
     y: float = Field(ge=-CITY_LIMIT, le=CITY_LIMIT)
+    scale: float = Field(default=1, ge=0.5, le=2.5)
+    rotation: float = Field(default=0, ge=0, le=6.283185307179586)
 
 
 class LandPlotCreateIn(BaseModel):
@@ -1583,7 +1587,7 @@ def get_bus_stops(authorization: str | None = Header(default=None)):
     with connect() as db:
         player = current_player(db, authorization)
         rows = db.execute(
-            "SELECT id, x, y, created_at FROM bus_stops WHERE server_id=? ORDER BY id",
+            "SELECT id, x, y, created_at, scale, rotation FROM bus_stops WHERE server_id=? ORDER BY id",
             (player["session_server"],)
         ).fetchall()
     return {"bus_stops": rows}
@@ -1600,10 +1604,10 @@ async def create_bus_stop(
         player = require_builder(db, authorization, x_builder_token)
         now = int(time.time())
         row = db.execute(
-            "INSERT INTO bus_stops(server_id, x, y, created_at, created_by) VALUES(?,?,?,?,?) RETURNING id",
-            (player["session_server"], data.x, data.y, now, player["id"])
+            "INSERT INTO bus_stops(server_id, x, y, created_at, created_by, scale, rotation) VALUES(?,?,?,?,?,?,?) RETURNING id",
+            (player["session_server"], data.x, data.y, now, player["id"], data.scale, data.rotation)
         ).fetchone()
-        bus_stop = {"id": row["id"], "x": data.x, "y": data.y, "created_at": now}
+        bus_stop = {"id": row["id"], "x": data.x, "y": data.y, "created_at": now, "scale": data.scale, "rotation": data.rotation}
     await ws_send_group(player["session_server"], {"type": "bus_stop", "bus_stop": bus_stop})
     return {"ok": True, "bus_stop": bus_stop}
 
