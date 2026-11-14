@@ -196,6 +196,23 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_map_markers_server
             ON map_markers(server_id, id)
         """)
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS land_plots (
+                id BIGSERIAL PRIMARY KEY,
+                server_id TEXT NOT NULL,
+                land_type TEXT NOT NULL,
+                points_json TEXT NOT NULL,
+                center_x DOUBLE PRECISION NOT NULL,
+                center_y DOUBLE PRECISION NOT NULL,
+                price BIGINT,
+                sold_to BIGINT REFERENCES players(id) ON DELETE SET NULL,
+                sold_city TEXT,
+                created_by BIGINT REFERENCES players(id) ON DELETE SET NULL,
+                created_at BIGINT NOT NULL,
+                updated_at BIGINT NOT NULL
+            )
+        """)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_land_plots_server ON land_plots(server_id, id)")
         db.execute("ALTER TABLE road_tiles ADD COLUMN IF NOT EXISTS orientation SMALLINT NOT NULL DEFAULT 0")
         db.execute("""
             CREATE TABLE IF NOT EXISTS game_announcement (
@@ -499,6 +516,20 @@ class MapMarkerIn(BaseModel):
 
 class MapMarkerDeleteIn(BaseModel):
     marker_id: int = Field(ge=1)
+
+
+class LandPlotCreateIn(BaseModel):
+    land_type: str = Field(pattern="^(agricultural|residential|industrial)$")
+    points: list[list[float]] = Field(min_length=3, max_length=100)
+
+
+class LandPlotPriceIn(BaseModel):
+    plot_id: int = Field(ge=1)
+    price: int = Field(ge=1, le=10_000_000_000)
+
+
+class LandPlotBuyIn(BaseModel):
+    plot_id: int = Field(ge=1)
 
 
 def require_builder(db, authorization, builder_token):
@@ -970,7 +1001,8 @@ def players(authorization: str | None = Header(default=None)):
         )
 
         rows = db.execute(
-            """SELECT p.name, p.state_json
+            """SELECT p.id, p.name, p.state_json,
+               EXISTS(SELECT 1 FROM road_builder_grants g WHERE g.player_id=p.id AND g.server_id=s.server_id) AS is_mayor
             FROM sessions s JOIN players p ON p.id=s.player_id
             WHERE s.server_id=? AND s.last_seen>=?
             ORDER BY p.name""",
@@ -983,7 +1015,8 @@ def players(authorization: str | None = Header(default=None)):
         state = json.loads(row["state_json"])
 
         visible.append({
-            "name": row["name"],
+            "id": int(row["id"]), "name": row["name"],
+            "is_mayor": bool(row["is_mayor"]),
             "playerX": state.get("playerX", 0),
             "playerY": state.get("playerY", 0)
         })
@@ -1062,7 +1095,8 @@ def builder_status(authorization: str | None = Header(default=None)):
             "SELECT 1 FROM road_builder_grants WHERE player_id=? AND server_id=?",
             (player["id"], server_id)
         ).fetchone() is not None
-    return {"allowed": bool(legacy_allowed or granted), "server_id": server_id}
+    is_mayor = bool(granted or (name == norm_name("پشتیبانی2") and server_id == "2") or (name == norm_name("پشتیبانی ۳") and server_id == "3"))
+    return {"allowed": bool(legacy_allowed or granted), "is_mayor": is_mayor, "server_id": server_id}
 
 
 @app.post("/api/builder/unlock")
@@ -1145,7 +1179,7 @@ def admin_list_players(
 
 
 @app.post("/api/admin/players/{player_id}/road-builder-grant")
-def admin_grant_road_builder(
+async def admin_grant_road_builder(
     player_id: int,
     data: RoadBuilderGrantIn,
     authorization: str | None = Header(default=None),
@@ -1162,11 +1196,15 @@ def admin_grant_road_builder(
             db.execute("""INSERT INTO road_builder_grants(player_id,server_id,granted_by,granted_at)
                 VALUES(?,?,?,?) ON CONFLICT(player_id,server_id) DO NOTHING""",
                 (player_id, sid, creator["id"], int(time.time())))
+    with connect() as db:
+        granted_player = db.execute("SELECT name FROM players WHERE id=?", (player_id,)).fetchone()
+    for sid in ids:
+        await ws_send_group(sid, {"type": "mayor_status", "player_id": player_id, "player_name": granted_player["name"] if granted_player else "", "is_mayor": True})
     return {"ok": True, "player_id": player_id, "server_ids": ids}
 
 
 @app.post("/api/admin/players/{player_id}/road-builder-revoke")
-def admin_revoke_road_builder(
+async def admin_revoke_road_builder(
     player_id: int,
     data: RoadBuilderGrantIn,
     authorization: str | None = Header(default=None),
@@ -1176,6 +1214,14 @@ def admin_revoke_road_builder(
         require_builder(db, authorization, x_builder_token)
         for sid in set(str(x) for x in data.server_ids):
             db.execute("DELETE FROM road_builder_grants WHERE player_id=? AND server_id=?", (player_id, sid))
+    with connect() as db:
+        revoked_player = db.execute("SELECT name FROM players WHERE id=?", (player_id,)).fetchone()
+    for sid in set(str(x) for x in data.server_ids):
+        legacy = bool(revoked_player and (
+            (norm_name(revoked_player["name"]) == norm_name("پشتیبانی2") and sid == "2") or
+            (norm_name(revoked_player["name"]) == norm_name("پشتیبانی ۳") and sid == "3")
+        ))
+        await ws_send_group(sid, {"type": "mayor_status", "player_id": player_id, "player_name": revoked_player["name"] if revoked_player else "", "is_mayor": legacy})
     return {"ok": True}
 
 
@@ -1314,6 +1360,136 @@ async def delete_road_tile(
     tile = {"x": data.x, "y": data.y}
     await ws_send_group(player["session_server"], {"type": "road_tile_deleted", "tile": tile})
     return {"ok": True, "tile": tile}
+
+
+def serialize_land_plot(row):
+    return {
+        "id": int(row["id"]), "server_id": str(row["server_id"]),
+        "land_type": row["land_type"], "points": json.loads(row["points_json"]),
+        "center_x": float(row["center_x"]), "center_y": float(row["center_y"]),
+        "price": int(row["price"]) if row["price"] is not None else None,
+        "sold": row["sold_to"] is not None, "sold_city": row["sold_city"],
+        "created_at": int(row["created_at"])
+    }
+
+
+@app.get("/api/land-plots")
+def get_land_plots(authorization: str | None = Header(default=None)):
+    with connect() as db:
+        player = current_player(db, authorization)
+        rows = db.execute(
+            "SELECT * FROM land_plots WHERE server_id=? ORDER BY id",
+            (player["session_server"],)
+        ).fetchall()
+    return {"plots": [serialize_land_plot(r) for r in rows]}
+
+
+@app.post("/api/land-plots")
+async def create_land_plot(
+    data: LandPlotCreateIn,
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None)
+):
+    with connect() as db:
+        player = require_builder(db, authorization, x_builder_token)
+        points = []
+        for pair in data.points:
+            if len(pair) != 2:
+                raise HTTPException(400, "مختصات نقاط معتبر نیست.")
+            x, y = float(pair[0]), float(pair[1])
+            if not (math.isfinite(x) and math.isfinite(y)) or abs(x) > CITY_LIMIT or abs(y) > CITY_LIMIT:
+                raise HTTPException(400, "نقطه خارج از محدوده شهر است.")
+            points.append([x, y])
+        if len(points) < 3:
+            raise HTTPException(400, "برای ساخت زمین حداقل سه نقطه لازم است.")
+        area = abs(sum(points[i][0]*points[(i+1)%len(points)][1] -
+                       points[(i+1)%len(points)][0]*points[i][1]
+                       for i in range(len(points))) / 2)
+        if area < 100:
+            raise HTTPException(400, "مساحت زمین خیلی کوچک است.")
+        cx = sum(p[0] for p in points) / len(points)
+        cy = sum(p[1] for p in points) / len(points)
+        now = int(time.time())
+        row = db.execute(
+            """INSERT INTO land_plots(server_id,land_type,points_json,center_x,center_y,
+               created_by,created_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?) RETURNING *""",
+            (player["session_server"], data.land_type, json.dumps(points),
+             cx, cy, player["id"], now, now)
+        ).fetchone()
+        plot = serialize_land_plot(row)
+    await ws_send_group(player["session_server"], {"type": "land_plot", "plot": plot})
+    return {"ok": True, "plot": plot}
+
+
+@app.post("/api/land-plots/price")
+async def set_land_plot_price(
+    data: LandPlotPriceIn,
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None)
+):
+    with connect() as db:
+        player = require_builder(db, authorization, x_builder_token)
+        row = db.execute(
+            "SELECT * FROM land_plots WHERE id=? AND server_id=? FOR UPDATE",
+            (data.plot_id, player["session_server"])
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "زمین پیدا نشد.")
+        if row["sold_to"] is not None:
+            raise HTTPException(409, "این زمین قبلاً فروخته شده است.")
+        db.execute("UPDATE land_plots SET price=?,updated_at=? WHERE id=?",
+                   (data.price, int(time.time()), data.plot_id))
+        row = db.execute("SELECT * FROM land_plots WHERE id=?", (data.plot_id,)).fetchone()
+        plot = serialize_land_plot(row)
+    await ws_send_group(player["session_server"], {"type": "land_plot_updated", "plot": plot})
+    return {"ok": True, "plot": plot}
+
+
+@app.post("/api/land-plots/buy")
+async def buy_land_plot(
+    data: LandPlotBuyIn,
+    authorization: str | None = Header(default=None)
+):
+    with connect() as db:
+        player = current_player(db, authorization)
+        sid = str(player["session_server"])
+        mayor = db.execute(
+            "SELECT 1 FROM road_builder_grants WHERE player_id=? AND server_id=?",
+            (player["id"], sid)
+        ).fetchone()
+        legacy_mayor = ((norm_name(player["name"]) == norm_name("پشتیبانی2") and sid == "2") or
+                        (norm_name(player["name"]) == norm_name("پشتیبانی ۳") and sid == "3"))
+        if not mayor and not legacy_mayor:
+            raise HTTPException(403, "فقط شهردار همین شهر می‌تواند زمین بخرد.")
+        plot = db.execute(
+            "SELECT * FROM land_plots WHERE id=? AND server_id=? FOR UPDATE",
+            (data.plot_id, sid)
+        ).fetchone()
+        if not plot:
+            raise HTTPException(404, "این زمین در شهر شما پیدا نشد.")
+        if plot["sold_to"] is not None:
+            raise HTTPException(409, "این زمین قبلاً فروخته شده است.")
+        if plot["price"] is None:
+            raise HTTPException(400, "قیمت این زمین هنوز تعیین نشده است.")
+        locked_player = db.execute("SELECT state_json FROM players WHERE id=? FOR UPDATE", (player["id"],)).fetchone()
+        state = json.loads(locked_player["state_json"] or "{}")
+        balance = int(state.get("balance", 0) or 0)
+        price = int(plot["price"])
+        if balance < price:
+            raise HTTPException(400, "موجودی شما برای خرید این زمین کافی نیست.")
+        state["balance"] = balance - price
+        db.execute("UPDATE players SET state_json=?,updated_at=? WHERE id=?",
+                   (json.dumps(state, ensure_ascii=False), int(time.time()), player["id"]))
+        city_name = SERVER_NAMES[sid]
+        db.execute(
+            "UPDATE land_plots SET sold_to=?,sold_city=?,updated_at=? WHERE id=?",
+            (player["id"], city_name, int(time.time()), data.plot_id)
+        )
+        updated = db.execute("SELECT * FROM land_plots WHERE id=?", (data.plot_id,)).fetchone()
+        result = serialize_land_plot(updated)
+    await ws_send_group(sid, {"type": "land_plot_updated", "plot": result})
+    return {"ok": True, "plot": result, "balance": state["balance"]}
 
 
 @app.get("/api/map-markers")
@@ -1699,7 +1875,8 @@ async def realtime_socket(websocket: WebSocket):
 
         with connect() as db:
             player = db.execute(
-                """SELECT p.id, p.name, p.server_id, p.state_json, s.token
+                """SELECT p.id, p.name, p.server_id, p.state_json, s.token,
+                   EXISTS(SELECT 1 FROM road_builder_grants g WHERE g.player_id=p.id AND g.server_id=p.server_id) AS is_mayor
                 FROM sessions s JOIN players p ON p.id=s.player_id
                 WHERE s.token=?""", (token,)
             ).fetchone()
@@ -1713,7 +1890,8 @@ async def realtime_socket(websocket: WebSocket):
             )
             cutoff = int(time.time()) - ACTIVE_SECONDS
             rows = db.execute(
-                """SELECT p.name, p.state_json
+                """SELECT p.id, p.name, p.state_json,
+                   EXISTS(SELECT 1 FROM road_builder_grants g WHERE g.player_id=p.id AND g.server_id=s.server_id) AS is_mayor
                 FROM sessions s JOIN players p ON p.id=s.player_id
                 WHERE s.server_id=? AND s.last_seen>=?
                 ORDER BY p.name""", (server_id, cutoff)
@@ -1726,7 +1904,8 @@ async def realtime_socket(websocket: WebSocket):
         for row in rows:
             state = json.loads(row["state_json"])
             snapshot.append({
-                "name": row["name"],
+                "id": int(row["id"]), "name": row["name"],
+                "is_mayor": bool(row["is_mayor"]),
                 "playerX": state.get("playerX", 0),
                 "playerY": state.get("playerY", 0)
             })
@@ -1738,13 +1917,18 @@ async def realtime_socket(websocket: WebSocket):
             "stock": initial_well["stock"],
             "last_regen_at": initial_well["last_regen_at"]
         })
+        with connect() as db:
+            initial_plots = db.execute("SELECT * FROM land_plots WHERE server_id=? ORDER BY id", (server_id,)).fetchall()
+        await websocket.send_json({"type": "land_plots_snapshot", "plots": [serialize_land_plot(r) for r in initial_plots]})
 
         # اعلام ورود بازیکن تازه به سایر افراد همان سرور
         initial_state = json.loads(player["state_json"])
         await ws_send_group(server_id, {
             "type": "upsert",
             "player": {
+                "id": int(player["id"]),
                 "name": player["name"],
+                "is_mayor": bool(player["is_mayor"]),
                 "playerX": initial_state.get("playerX", 0),
                 "playerY": initial_state.get("playerY", 0)
             }
