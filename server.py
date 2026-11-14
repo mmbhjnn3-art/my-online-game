@@ -1612,6 +1612,26 @@ async def create_bus_stop(
     return {"ok": True, "bus_stop": bus_stop}
 
 
+@app.delete("/api/bus-stops/{bus_stop_id}")
+async def delete_bus_stop(
+    bus_stop_id: int,
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None),
+):
+    """Only the creator can remove a bus stop from the current server."""
+    with connect() as db:
+        player = require_builder(db, authorization, x_builder_token)
+        row = db.execute(
+            "DELETE FROM bus_stops WHERE id=? AND server_id=? RETURNING id, x, y",
+            (bus_stop_id, player["session_server"]),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="ایستگاه در این شهر پیدا نشد.")
+        deleted = dict(row)
+    await ws_send_group(player["session_server"], {"type": "bus_stop_deleted", "bus_stop_id": bus_stop_id})
+    return {"ok": True, "bus_stop_id": bus_stop_id}
+
+
 @app.get("/api/map-markers")
 def get_map_markers(authorization: str | None = Header(default=None)):
     """All authenticated players can view the map markers in their current server."""
