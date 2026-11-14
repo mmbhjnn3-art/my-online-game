@@ -1427,14 +1427,15 @@ function landDraftMeasure(a,b,index){
  }
  const len=Math.hypot(dx,dz);
  if(len<0.001)return {angle:0,distance:0};
- const forward=(dx*fx+dz*fz)/len;
- // مثبت یعنی گردش به راست و منفی یعنی گردش به چپ.
- const rightX=-fz,rightZ=fx;
+ // مبنای صفر، جهت برگشت از نقطه قبلی است؛ یعنی ۱۸۰ درجه نسبت به امتداد حرکت قبلی.
+ const refX=-fx,refZ=-fz;
+ const forward=(dx*refX+dz*refZ)/len;
+ // مثبت یعنی سمت راستِ نقطه قبلی و منفی یعنی سمت چپِ آن.
+ const rightX=-refZ,rightZ=refX;
  const right=(dx*rightX+dz*rightZ)/len;
  let angle=Math.atan2(right,forward)*180/Math.PI;
- // نمایش مطابق درجه‌بندی GPS بازی: از ۹- تا ۹+ درجه.
+ // فقط بازه درجه‌بندی GPS نمایش داده می‌شود؛ بدون عدد اعشاری.
  angle=Math.max(-9,Math.min(9,angle));
- // درجه بدون اعشار و فاصله برحسب متر کامل محاسبه می‌شود.
  return {angle:Math.round(angle),distance:Math.round(len)};
 }
 function makeLandMeasureSprite(text){
