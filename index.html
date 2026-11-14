@@ -78,7 +78,7 @@ body.immersive-camera #cityCanvas{width:100%!important;height:100%!important;dis
 body.immersive-camera #city3dCanvas{display:block!important;width:100%!important;height:100%!important;position:absolute;inset:0}
 #city3dCanvas{display:none;touch-action:none;background:#1a3a2f}
 #busStop3DButton{display:none;position:fixed;top:max(72px,env(safe-area-inset-top));right:14px;z-index:100125;background:#153b2e;color:#ffe08a;border:2px solid #ffd166;border-radius:14px;padding:11px 14px;font-weight:900;box-shadow:0 5px 18px #0008}
-#busStop3DPanel{position:fixed;right:10px;left:auto;bottom:max(86px,calc(env(safe-area-inset-bottom) + 76px));z-index:100130;background:linear-gradient(145deg,#21483b,#10271f);border:2px solid #ffd166;border-radius:14px;padding:9px;color:#fff;box-shadow:0 8px 24px #000b;display:none;width:min(310px,calc(100vw - 20px));max-height:52vh;overflow:auto;margin:0}
+#busStop3DPanel{position:fixed;right:10px;left:auto;bottom:max(86px,calc(env(safe-area-inset-bottom) + 76px));z-index:100130;background:linear-gradient(145deg,#21483b,#10271f);border:2px solid #ffd166;border-radius:14px;padding:9px;color:#fff;box-shadow:0 8px 24px #000b;display:none;width:min(310px,calc(100vw - 20px));max-height:min(70vh,calc(100dvh - 20px));overflow:auto;overscroll-behavior:contain;margin:0}
 /* اجازه انتخاب زمین از پشت پنل؛ فقط کنترل‌ها کلیک را دریافت می‌کنند */
 #busStop3DPanel{pointer-events:none}
 #busStop3DPanel input,#busStop3DPanel button{pointer-events:auto}
@@ -183,7 +183,7 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
 <body>
 <button id="busStop3DButton" type="button">🚏 ساخت ایستگاه</button>
 <div id="busStop3DPanel" aria-live="polite">
- <div id="busStop3DTitle" style="font-weight:bold;color:#ffd166;margin-bottom:5px">🚏 جانمایی ایستگاه اتوبوس</div>
+ <div id="busStop3DTitle" style="font-weight:bold;color:#ffd166;margin:-2px -2px 8px;padding:8px 6px 10px;border-bottom:1px solid #ffffff44;cursor:grab;touch-action:none;user-select:none">☰ جابه‌جایی پنجره　🚏 ایستگاه اتوبوس</div>
  <div id="busStop3DHint" style="font-size:12px;line-height:1.8">روی زمین شهر لمس کن تا پیش‌نمایش ایستگاه همان‌جا قرار بگیرد.</div>
  <label for="busStopScale" style="display:block;font-size:12px;margin-top:8px">اندازه ایستگاه: <b id="busStopScaleValue">۱۰۰٪</b></label>
  <input id="busStopScale" type="range" min="50" max="1000" step="5" value="100">
@@ -2300,6 +2300,36 @@ $("mapAddMarkerButton").onclick=()=>{
  mapMode="marker";
  $("mapHint").textContent="نقطه مکان جدید را روی نقشه لمس کن؛ فقط سازنده می‌تواند مکان ثبت کند.";
 };
+// جابه‌جایی عمودی پنجره با کشیدن نوار عنوان؛ کنترل‌های داخل پنجره دست‌نخورده می‌مانند.
+(function(){
+ const panel=$("busStop3DPanel"), handle=$("busStop3DTitle");
+ if(!panel||!handle)return;
+ let dragging=false,startY=0,startTop=0;
+ handle.addEventListener("pointerdown",e=>{
+  if(e.button!==undefined&&e.button!==0)return;
+  const r=panel.getBoundingClientRect();
+  dragging=true;startY=e.clientY;startTop=r.top;
+  panel.style.bottom="auto";panel.style.top=Math.max(8,r.top)+"px";
+  handle.style.cursor="grabbing";
+  try{handle.setPointerCapture(e.pointerId);}catch(_e){}
+  e.preventDefault();
+ });
+ handle.addEventListener("pointermove",e=>{
+  if(!dragging)return;
+  const maxTop=Math.max(8,window.innerHeight-panel.offsetHeight-8);
+  const next=Math.min(maxTop,Math.max(8,startTop+e.clientY-startY));
+  panel.style.top=next+"px";
+ });
+ const stop=()=>{dragging=false;handle.style.cursor="grab";};
+ handle.addEventListener("pointerup",stop);
+ handle.addEventListener("pointercancel",stop);
+ window.addEventListener("resize",()=>{
+  if(panel.classList.contains("active")&&panel.style.top){
+   const maxTop=Math.max(8,window.innerHeight-panel.offsetHeight-8);
+   panel.style.top=Math.min(maxTop,Math.max(8,panel.getBoundingClientRect().top))+"px";
+  }
+ });
+})();
 $("busStop3DButton").onclick=startBusStop3DPlacement;
 $("busStopScale").addEventListener("input",e=>{busStopPlacementScale=Number(e.target.value)/100;updateBusStopPlacementControls();});
 $("busStopRotation").addEventListener("input",e=>{busStopPlacementRotation=Number(e.target.value)*Math.PI/180;updateBusStopPlacementControls();});
