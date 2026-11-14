@@ -79,6 +79,9 @@ body.immersive-camera #city3dCanvas{display:block!important;width:100%!important
 #city3dCanvas{display:none;touch-action:none;background:#1a3a2f}
 #busStop3DButton{display:none;position:fixed;top:max(72px,env(safe-area-inset-top));right:14px;z-index:100125;background:#153b2e;color:#ffe08a;border:2px solid #ffd166;border-radius:14px;padding:11px 14px;font-weight:900;box-shadow:0 5px 18px #0008}
 #busStop3DPanel{position:fixed;right:12px;left:12px;bottom:max(16px,env(safe-area-inset-bottom));z-index:100130;background:linear-gradient(145deg,#21483b,#10271f);border:2px solid #ffd166;border-radius:16px;padding:13px;color:#fff;box-shadow:0 12px 36px #000b;display:none;max-width:480px;margin:auto}
+/* اجازه انتخاب زمین از پشت پنل؛ فقط کنترل‌ها کلیک را دریافت می‌کنند */
+#busStop3DPanel{pointer-events:none}
+#busStop3DPanel input,#busStop3DPanel button{pointer-events:auto}
 #busStop3DPanel.active{display:block}
 #busStop3DPanel input{width:100%;padding:6px;accent-color:#ffd166}
 #busStop3DPanel .row{margin-top:8px}
@@ -183,7 +186,7 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
  <div style="font-weight:bold;color:#ffd166;margin-bottom:6px">🚏 جانمایی ایستگاه اتوبوس</div>
  <div id="busStop3DHint" style="font-size:12px;line-height:1.8">روی زمین شهر لمس کن تا پیش‌نمایش ایستگاه همان‌جا قرار بگیرد.</div>
  <label for="busStopScale" style="display:block;font-size:12px;margin-top:8px">اندازه ایستگاه: <b id="busStopScaleValue">۱۰۰٪</b></label>
- <input id="busStopScale" type="range" min="50" max="250" step="5" value="100">
+ <input id="busStopScale" type="range" min="50" max="1000" step="5" value="100">
  <label for="busStopRotation" style="display:block;font-size:12px;margin-top:7px">چرخش: <b id="busStopRotationValue">۰°</b></label>
  <input id="busStopRotation" type="range" min="0" max="355" step="5" value="0">
  <div class="row"><button id="busStopCancel" class="secondary" type="button">لغو</button><button id="busStopConfirm" class="primary" type="button" disabled>تأیید و ثبت</button></div>
@@ -823,6 +826,8 @@ function applyRealtimeMessage(data){
   if(marker)mapMarkers=mapMarkers.filter(m=>Number(m.id)!==Number(marker.id));
   drawOverviewMap();
  }else if(data.type==="bus_stop"){
+ }else if(data.type==="bus_stop_deleted"){
+  busStops=busStops.filter(v=>Number(v.id)!==Number(data.bus_stop_id));drawOverviewMap();drawCity();syncBusStops3D();
   const s=data.bus_stop;if(s&&!busStops.some(v=>Number(v.id)===Number(s.id)))busStops.push(s);drawOverviewMap();drawCity();syncBusStops3D();
  }else if(data.type==="land_plots_snapshot"){
   landPlots=Array.isArray(data.plots)?data.plots:[];syncLandPlots3D();
@@ -2403,7 +2408,7 @@ canvas.addEventListener("pointercancel",()=>{moveX=0;moveY=0;save()});
 const c3el=$("city3dCanvas");
 let touchLookMoved=false;
 if(c3el){
- c3el.addEventListener("pointerdown",e=>{
+ c3el.addEventListener("pointerdown",async e=>{
   if(!immersiveActive||!account)return;
   c3el.setPointerCapture(e.pointerId);
   touchLookMoved=false;
@@ -2419,6 +2424,31 @@ if(c3el){
   if(landPlacementType){
    if(hitLastDraftPoint(e.clientX,e.clientY)){landDraggingLastPoint=true;touchLookActive=false;return;}
    const point=getGroundPoint(e.clientX,e.clientY);if(point)addLandPlacementPoint(point);touchLookActive=false;return;
+  }
+  // Creator can tap an existing bus stop to remove it.
+  if(isCreatorAccount()&&builderToken){
+   const rect=c3el.getBoundingClientRect();
+   world3d.pointer.set(((e.clientX-rect.left)/rect.width)*2-1,-((e.clientY-rect.top)/rect.height)*2+1);
+   world3d.raycaster.setFromCamera(world3d.pointer,world3d.camera);
+   const stationHits=world3d.raycaster.intersectObject(world3d.busStopGroup,true);
+   if(stationHits.length){
+    let node=stationHits[0].object;
+    while(node.parent&&node.parent!==world3d.busStopGroup)node=node.parent;
+    const entry=[...(world3d.busStopMeshes||new Map()).entries()].find(([id,mesh])=>mesh===node);
+    if(entry){
+     touchLookActive=false;
+     if(confirm("این ایستگاه اتوبوس در همین شهر حذف شود؟")){
+      try{
+       const resp=await fetch(API+"/bus-stops/"+encodeURIComponent(entry[0]),{method:"DELETE",headers:{"Authorization":"Bearer "+authToken,"X-Builder-Token":builderToken}});
+       const result=await resp.json().catch(()=>({}));
+       if(!resp.ok)throw new Error(result.detail||"حذف ایستگاه انجام نشد.");
+       busStops=busStops.filter(v=>String(v.id)!==String(entry[0]));
+       drawOverviewMap();drawCity();syncBusStops3D();
+      }catch(err){alert(err.message||"حذف ایستگاه انجام نشد.");}
+     }
+     return;
+    }
+   }
   }
   const clickedPlot=hitLandSign(e.clientX,e.clientY);if(clickedPlot){interactLandPlot(clickedPlot);touchLookActive=false;return;}
   // اگر دقیقاً روی مدل چاه کلیک شد → باز کردن چاه
