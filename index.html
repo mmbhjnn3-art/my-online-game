@@ -77,6 +77,13 @@ body.immersive-camera .world{flex:1;margin:0!important;border:0;border-radius:0;
 body.immersive-camera #cityCanvas{width:100%!important;height:100%!important;display:none!important}
 body.immersive-camera #city3dCanvas{display:block!important;width:100%!important;height:100%!important;position:absolute;inset:0}
 #city3dCanvas{display:none;touch-action:none;background:#1a3a2f}
+#busStop3DButton{display:none;position:fixed;top:max(72px,env(safe-area-inset-top));right:14px;z-index:100125;background:#153b2e;color:#ffe08a;border:2px solid #ffd166;border-radius:14px;padding:11px 14px;font-weight:900;box-shadow:0 5px 18px #0008}
+#busStop3DPanel{position:fixed;right:12px;left:12px;bottom:max(16px,env(safe-area-inset-bottom));z-index:100130;background:linear-gradient(145deg,#21483b,#10271f);border:2px solid #ffd166;border-radius:16px;padding:13px;color:#fff;box-shadow:0 12px 36px #000b;display:none;max-width:480px;margin:auto}
+#busStop3DPanel.active{display:block}
+#busStop3DPanel input{width:100%;padding:6px;accent-color:#ffd166}
+#busStop3DPanel .row{margin-top:8px}
+#busStop3DPanel .row button{flex:1}
+
 body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:none;z-index:45;margin:0;padding:0;background:transparent;border:0;border-radius:0}
 /* افزوده‌شده: صفحه اختصاصی هنگام قطع ارتباط */
 #offlineScreen{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;overflow:auto;background:radial-gradient(ellipse at top,#244d3e,#0c1c18 72%);padding:20px}
@@ -171,6 +178,16 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
 .gps-point-marker{cursor:grab}
 </style></head>
 <body>
+<button id="busStop3DButton" type="button">🚏 ساخت ایستگاه</button>
+<div id="busStop3DPanel" aria-live="polite">
+ <div style="font-weight:bold;color:#ffd166;margin-bottom:6px">🚏 جانمایی ایستگاه اتوبوس</div>
+ <div id="busStop3DHint" style="font-size:12px;line-height:1.8">روی زمین شهر لمس کن تا پیش‌نمایش ایستگاه همان‌جا قرار بگیرد.</div>
+ <label for="busStopScale" style="display:block;font-size:12px;margin-top:8px">اندازه ایستگاه: <b id="busStopScaleValue">۱۰۰٪</b></label>
+ <input id="busStopScale" type="range" min="50" max="250" step="5" value="100">
+ <label for="busStopRotation" style="display:block;font-size:12px;margin-top:7px">چرخش: <b id="busStopRotationValue">۰°</b></label>
+ <input id="busStopRotation" type="range" min="0" max="355" step="5" value="0">
+ <div class="row"><button id="busStopCancel" class="secondary" type="button">لغو</button><button id="busStopConfirm" class="primary" type="button" disabled>تأیید و ثبت</button></div>
+</div>
 
 
 <div id="offlineScreen" role="alert" aria-live="assertive">
@@ -1122,7 +1139,7 @@ function initWorld3D(){
  const roadsGroup=new THREE.Group();scene.add(roadsGroup);
  world3d={
   scene,camera,renderer,localPlayer,othersGroup,roadsGroup,wellG,
-  otherMeshes:new Map(),roadMeshes:new Map(),landMeshes:new Map(),landGroup:null,busStopGroup:new THREE.Group(),busStopMeshes:new Map(),
+  otherMeshes:new Map(),roadMeshes:new Map(),landMeshes:new Map(),landGroup:null,busStopGroup:new THREE.Group(),busStopMeshes:new Map(),busStopPreview:null,
   raycaster:new THREE.Raycaster(),
   pointer:new THREE.Vector2(),
   ready:true
@@ -1168,7 +1185,7 @@ async function loadBusStopModel(){
 }
 async function syncBusStops3D(){
  if(!world3d||!world3d.busStopGroup)return;
- const signature=JSON.stringify((busStops||[]).map(s=>[s.id,s.x,s.y]));
+ const signature=JSON.stringify((busStops||[]).map(s=>[s.id,s.x,s.y,s.scale,s.rotation]));
  if(world3d.busStopSignature===signature)return;
  world3d.busStopSignature=signature;
  world3d.busStopGroup.clear();world3d.busStopMeshes.clear();
@@ -1177,16 +1194,56 @@ async function syncBusStops3D(){
   const template=await loadBusStopModel();
   (busStops||[]).forEach(s=>{
    const model=template.clone(true);
-   model.scale.setScalar(.1);
+   model.scale.setScalar(.1*(Number(s.scale)||1));
    // Center the imported OBJ pivot and put its base on the ground.
    model.position.set(1.16,0,0);
    model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;if(o.material){const mats=Array.isArray(o.material)?o.material:[o.material];mats.forEach(m=>{m.side=THREE.DoubleSide;});}}});
-   const holder=new THREE.Group();holder.position.set(Number(s.x)||0,0,Number(s.y)||0);holder.add(model);
+   const holder=new THREE.Group();holder.position.set(Number(s.x)||0,0,Number(s.y)||0);holder.rotation.y=Number(s.rotation)||0;holder.add(model);
    world3d.busStopGroup.add(holder);world3d.busStopMeshes.set(String(s.id),holder);
   });
  }catch(e){console.error("Bus stop model load failed",e);if($("cityMsg"))$("cityMsg").textContent="بارگذاری مدل ایستگاه اتوبوس انجام نشد؛ اتصال فایل مدل را بررسی کن.";}
 }
 function nearBusStop(x,y,radius=40){return (busStops||[]).some(s=>Math.hypot(Number(s.x)-x,Number(s.y)-y)<radius);}
+let busStopPlacementActive=false,busStopPlacementPoint=null,busStopPlacementScale=1,busStopPlacementRotation=0;
+async function startBusStop3DPlacement(){
+ if(!isCreatorAccount()||!builderToken){alert("فقط سازنده بازی می‌تواند ایستگاه بسازد.");return;}
+ if(cameraMode!=="third"||!immersiveActive||!world3d){alert("ابتدا دوربین را روی حالت سوم‌شخص قرار بده.");return;}
+ try{
+  const template=await loadBusStopModel();
+  cancelBusStop3DPlacement();
+  const model=template.clone(true);
+  model.scale.setScalar(.1);
+  model.position.set(1.16,0,0);
+  model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;if(o.material){const mats=Array.isArray(o.material)?o.material:[o.material];o.material=Array.isArray(o.material)?mats.map(m=>m.clone()):mats[0].clone();(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{m.transparent=true;m.opacity=.72;m.depthWrite=false;m.side=THREE.DoubleSide;});}}});
+  const holder=new THREE.Group();holder.visible=false;holder.add(model);world3d.scene.add(holder);world3d.busStopPreview=holder;
+  busStopPlacementActive=true;busStopPlacementPoint=null;busStopPlacementScale=1;busStopPlacementRotation=0;
+  $("busStopScale").value="100";$("busStopRotation").value="0";updateBusStopPlacementControls();
+  $("busStop3DPanel").classList.add("active");$("busStop3DHint").textContent="روی زمین شهر ضربه بزن تا پیش‌نمایش ظاهر شود؛ اندازه و جهت را تنظیم کن و تأیید بزن.";
+ }catch(e){console.error(e);alert("مدل ایستگاه بارگذاری نشد. فایل busstop-model.glb را کنار سرور قرار بده.");}
+}
+function updateBusStopPlacementControls(){
+ $("busStopScaleValue").textContent=Math.round(busStopPlacementScale*100)+"٪";
+ $("busStopRotationValue").textContent=Math.round(busStopPlacementRotation*180/Math.PI)+"°";
+ if(world3d?.busStopPreview){world3d.busStopPreview.scale.setScalar(busStopPlacementScale);world3d.busStopPreview.rotation.y=busStopPlacementRotation;}
+}
+function cancelBusStop3DPlacement(){
+ busStopPlacementActive=false;busStopPlacementPoint=null;
+ if(world3d?.busStopPreview){world3d.scene.remove(world3d.busStopPreview);world3d.busStopPreview.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){const a=Array.isArray(o.material)?o.material:[o.material];a.forEach(m=>m.dispose());}});world3d.busStopPreview=null;}
+ $("busStop3DPanel")?.classList.remove("active");
+}
+async function confirmBusStop3DPlacement(){
+ if(!busStopPlacementActive||!busStopPlacementPoint){$("busStop3DHint").textContent="اول روی زمین شهر نقطه ایستگاه را انتخاب کن.";return;}
+ if(!isCreatorAccount()||!builderToken){cancelBusStop3DPlacement();return;}
+ const b=$("busStopConfirm");b.disabled=true;
+ try{
+  const d=await roadAction("/bus-stops",{x:busStopPlacementPoint.x,y:busStopPlacementPoint.z,scale:busStopPlacementScale,rotation:busStopPlacementRotation});
+  if(d.bus_stop&&!busStops.some(v=>Number(v.id)===Number(d.bus_stop.id)))busStops.push(d.bus_stop);
+  if(d.bus_stop){cityTreeMeshes=cityTreeMeshes.filter(t=>{if(Math.hypot(Number(t.x)-Number(d.bus_stop.x),Number(t.y)-Number(d.bus_stop.y))<48){if(world3d)world3d.scene.remove(t.mesh);return false;}return true;});}
+  cancelBusStop3DPlacement();drawOverviewMap();drawCity();syncBusStops3D();
+ }catch(e){$("busStop3DHint").textContent=e.message||"ثبت ایستگاه انجام نشد.";}
+ finally{b.disabled=false;}
+}
+
 function syncRoads3D(){
  if(!world3d)return;
  const seen=new Set();
@@ -1334,16 +1391,16 @@ function cycleCameraMode(){
  if(cameraMode==="top"){
   cameraMode="third";
   updateCameraModeUI();
-  enterImmersiveCamera();updateGpsVisibility();
+  enterImmersiveCamera();updateGpsVisibility();updateBuilderVisibility();
  }else if(cameraMode==="third"){
   cameraMode="first";
   updateCameraModeUI();
   if(!immersiveActive)enterImmersiveCamera();
-  else{resize3D();drawCity();}updateGpsVisibility();
+  else{resize3D();drawCity();}updateGpsVisibility();updateBuilderVisibility();
  }else{
   cameraMode="top";
   updateCameraModeUI();
-  exitImmersiveCamera();updateGpsVisibility();
+  exitImmersiveCamera();updateGpsVisibility();updateBuilderVisibility();
  }
 }
 function returnToTopCamera(){
@@ -1416,6 +1473,7 @@ function updateBuilderVisibility(){
  $("updateManagementSection").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  $("mapAddMarkerButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  $("busStopToolButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
+ $("busStop3DButton").style.display=(isCreatorAccount()&&!!builderToken&&cameraMode==="third"&&immersiveActive)?"block":"none";
  if(!allowed){$("mapAddMarkerButton").classList.add("hidden");$("busStopToolButton").classList.add("hidden");builderToken=null;builderMode=false;rotateRoadMode=false;$("asphaltToolButton").classList.add("hidden");$("rotateRoadButton").classList.add("hidden");$("adminPlayersPanel").classList.add("hidden");$("adminPlayersButton").disabled=true;}
 }
 function updateGpsVisibility(){
@@ -2210,6 +2268,11 @@ $("mapAddMarkerButton").onclick=()=>{
  mapMode="marker";
  $("mapHint").textContent="نقطه مکان جدید را روی نقشه لمس کن؛ فقط سازنده می‌تواند مکان ثبت کند.";
 };
+$("busStop3DButton").onclick=startBusStop3DPlacement;
+$("busStopScale").addEventListener("input",e=>{busStopPlacementScale=Number(e.target.value)/100;updateBusStopPlacementControls();});
+$("busStopRotation").addEventListener("input",e=>{busStopPlacementRotation=Number(e.target.value)*Math.PI/180;updateBusStopPlacementControls();});
+$("busStopCancel").onclick=cancelBusStop3DPlacement;
+$("busStopConfirm").onclick=confirmBusStop3DPlacement;
 $("busStopToolButton").onclick=()=>{
  if(!isCreatorAccount()||!builderToken){alert("فقط سازنده بازی می‌تواند ایستگاه اتوبوس بسازد.");return;}
  mapMode="busstop";$("mapModal").classList.remove("hidden");drawOverviewMap();
@@ -2344,6 +2407,15 @@ if(c3el){
   if(!immersiveActive||!account)return;
   c3el.setPointerCapture(e.pointerId);
   touchLookMoved=false;
+  if(busStopPlacementActive){
+   const point=getGroundPoint(e.clientX,e.clientY);
+   if(point&&Math.abs(point.x)<=CITY_HALF&&Math.abs(point.z)<=CITY_HALF){
+    busStopPlacementPoint=point;
+    if(world3d.busStopPreview){world3d.busStopPreview.position.set(point.x,0,point.z);world3d.busStopPreview.visible=true;}
+    $("busStopConfirm").disabled=false;$("busStop3DHint").textContent="پیش‌نمایش در محل انتخاب‌شده است؛ اندازه و چرخش را تنظیم کن و تأیید بزن.";
+   }else{$("busStop3DHint").textContent="نقطه‌ای داخل محدوده شهر انتخاب کن.";}
+   touchLookActive=false;return;
+  }
   if(landPlacementType){
    if(hitLastDraftPoint(e.clientX,e.clientY)){landDraggingLastPoint=true;touchLookActive=false;return;}
    const point=getGroundPoint(e.clientX,e.clientY);if(point)addLandPlacementPoint(point);touchLookActive=false;return;
@@ -2371,6 +2443,7 @@ if(c3el){
   syncFacingFromYaw();
  });
  c3el.addEventListener("pointerup",e=>{
+  if(busStopPlacementActive){touchLookActive=false;touchLookMoved=false;return;}
   if(landDraggingLastPoint){landDraggingLastPoint=false;touchLookActive=false;touchLookMoved=false;return;}
   if(landPlacementType){touchLookActive=false;touchLookMoved=false;return;}
   // اگر حرکت کم بود و روی چاه رها شد، دوباره امتحان کن
