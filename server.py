@@ -528,6 +528,16 @@ class LandPlotPriceIn(BaseModel):
     price: int = Field(ge=1, le=10_000_000_000)
 
 
+class LandPlotUpdateIn(BaseModel):
+    plot_id: int = Field(ge=1)
+    land_type: str = Field(pattern="^(agricultural|residential|industrial)$")
+    price: int | None = Field(default=None, ge=1, le=10_000_000_000)
+
+
+class LandPlotDeleteIn(BaseModel):
+    plot_id: int = Field(ge=1)
+
+
 class LandPlotBuyIn(BaseModel):
     plot_id: int = Field(ge=1)
 
@@ -1444,6 +1454,57 @@ async def set_land_plot_price(
         plot = serialize_land_plot(row)
     await ws_send_group(player["session_server"], {"type": "land_plot_updated", "plot": plot})
     return {"ok": True, "plot": plot}
+
+
+@app.post("/api/land-plots/update")
+async def update_land_plot(
+    data: LandPlotUpdateIn,
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None)
+):
+    with connect() as db:
+        player = require_builder(db, authorization, x_builder_token)
+        row = db.execute(
+            "SELECT * FROM land_plots WHERE id=? AND server_id=? FOR UPDATE",
+            (data.plot_id, player["session_server"])
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "زمین پیدا نشد.")
+        if row["sold_to"] is not None:
+            raise HTTPException(409, "زمین فروخته‌شده قابل ویرایش نیست.")
+        db.execute(
+            "UPDATE land_plots SET land_type=?, price=?, updated_at=? WHERE id=?",
+            (data.land_type, data.price, int(time.time()), data.plot_id)
+        )
+        updated = db.execute(
+            "SELECT * FROM land_plots WHERE id=? AND server_id=?",
+            (data.plot_id, player["session_server"])
+        ).fetchone()
+        plot = serialize_land_plot(updated)
+    await ws_send_group(player["session_server"], {"type": "land_plot_updated", "plot": plot})
+    return {"ok": True, "plot": plot}
+
+
+@app.post("/api/land-plots/delete")
+async def delete_land_plot(
+    data: LandPlotDeleteIn,
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None)
+):
+    with connect() as db:
+        player = require_builder(db, authorization, x_builder_token)
+        row = db.execute(
+            "SELECT id FROM land_plots WHERE id=? AND server_id=? FOR UPDATE",
+            (data.plot_id, player["session_server"])
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "زمین پیدا نشد.")
+        db.execute(
+            "DELETE FROM land_plots WHERE id=? AND server_id=?",
+            (data.plot_id, player["session_server"])
+        )
+    await ws_send_group(player["session_server"], {"type": "land_plot_deleted", "plot_id": data.plot_id})
+    return {"ok": True, "plot_id": data.plot_id}
 
 
 @app.post("/api/land-plots/buy")
