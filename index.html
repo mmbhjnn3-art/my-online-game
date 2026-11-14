@@ -1413,28 +1413,22 @@ async function finishLandPlacement(){
 }
 function landDraftMeasure(a,b,index){
  const dx=b[0]-a[0],dz=b[1]-a[1];
- let fx=0,fz=-1;
- if(index>=2){
-  const prev=landPlacementPoints[index-1],before=landPlacementPoints[index-2];
-  const hx=prev[0]-before[0],hz=prev[1]-before[1],hl=Math.hypot(hx,hz);
-  if(hl>0.001){fx=hx/hl;fz=hz/hl;}
- }else{
-  // برای اولین ضلع، امتداد از موقعیت کاراکتر به نقطه قبلی مبنای صفر درجه است؛ دوربین دخالتی ندارد.
-  const playerX=world3d&&world3d.localPlayer?world3d.localPlayer.position.x:(Number(account?.playerX)||0);
-  const playerZ=world3d&&world3d.localPlayer?world3d.localPlayer.position.z:(Number(account?.playerY)||0);
-  const hx=a[0]-playerX,hz=a[1]-playerZ,hl=Math.hypot(hx,hz);
-  if(hl>0.001){fx=hx/hl;fz=hz/hl;}
- }
  const len=Math.hypot(dx,dz);
  if(len<0.001)return {angle:0,distance:0};
- // مبنای صفر، جهت برگشت از نقطه قبلی است؛ یعنی ۱۸۰ درجه نسبت به امتداد حرکت قبلی.
+ // ضلع اول مرجع مقایسه ندارد؛ زاویه آن صفر است و به کاراکتر/دوربین وابسته نیست.
+ if(index<2)return {angle:0,distance:Math.round(len)};
+ // صفر درجه یعنی نقطه جدید دقیقاً در امتداد برگشتِ ضلع قبلی قرار گرفته است.
+ const prev=landPlacementPoints[index-1],before=landPlacementPoints[index-2];
+ const hx=prev[0]-before[0],hz=prev[1]-before[1],hl=Math.hypot(hx,hz);
+ if(hl<0.001)return {angle:0,distance:Math.round(len)};
+ const fx=hx/hl,fz=hz/hl;
  const refX=-fx,refZ=-fz;
  const forward=(dx*refX+dz*refZ)/len;
- // مثبت یعنی سمت راستِ نقطه قبلی و منفی یعنی سمت چپِ آن.
+ // مثبت یعنی انحراف به راستِ امتداد قبلی و منفی یعنی انحراف به چپ.
  const rightX=-refZ,rightZ=refX;
  const right=(dx*rightX+dz*rightZ)/len;
  let angle=Math.atan2(right,forward)*180/Math.PI;
- // فقط بازه درجه‌بندی GPS نمایش داده می‌شود؛ بدون عدد اعشاری.
+ // بازه نمایش زاویه GPS: از ۹- تا ۹+ درجه.
  angle=Math.max(-9,Math.min(9,angle));
  return {angle:Math.round(angle),distance:Math.round(len)};
 }
