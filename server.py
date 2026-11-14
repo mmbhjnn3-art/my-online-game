@@ -61,7 +61,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type", "X-Builder-Token"],
 )
 
@@ -534,8 +534,13 @@ class MapMarkerDeleteIn(BaseModel):
 class BusStopCreateIn(BaseModel):
     x: float = Field(ge=-CITY_LIMIT, le=CITY_LIMIT)
     y: float = Field(ge=-CITY_LIMIT, le=CITY_LIMIT)
-    scale: float = Field(default=1, ge=0.5, le=2.5)
+    scale: float = Field(default=1, ge=0.5, le=10)
     rotation: float = Field(default=0, ge=0, le=6.283185307179586)
+
+
+class BusStopUpdateIn(BaseModel):
+    scale: float = Field(ge=0.5, le=10)
+    rotation: float = Field(ge=0, le=6.283185307179586)
 
 
 class LandPlotCreateIn(BaseModel):
@@ -1609,6 +1614,27 @@ async def create_bus_stop(
         ).fetchone()
         bus_stop = {"id": row["id"], "x": data.x, "y": data.y, "created_at": now, "scale": data.scale, "rotation": data.rotation}
     await ws_send_group(player["session_server"], {"type": "bus_stop", "bus_stop": bus_stop})
+    return {"ok": True, "bus_stop": bus_stop}
+
+
+@app.put("/api/bus-stops/{bus_stop_id}")
+async def update_bus_stop(
+    bus_stop_id: int,
+    data: BusStopUpdateIn,
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None),
+):
+    """Only the creator can change a bus stop's size and angle in the current city."""
+    with connect() as db:
+        player = require_builder(db, authorization, x_builder_token)
+        row = db.execute(
+            "UPDATE bus_stops SET scale=?, rotation=? WHERE id=? AND server_id=? RETURNING id, x, y, created_at, scale, rotation",
+            (data.scale, data.rotation, bus_stop_id, player["session_server"]),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="ایستگاه در این شهر پیدا نشد.")
+        bus_stop = dict(row)
+    await ws_send_group(player["session_server"], {"type": "bus_stop_updated", "bus_stop": bus_stop})
     return {"ok": True, "bus_stop": bus_stop}
 
 
