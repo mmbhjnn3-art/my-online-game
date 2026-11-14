@@ -147,6 +147,13 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
 #gpsPlacementActions.active{display:flex}
 #gpsPlacementActions button{flex:1}
 #gpsStatus{margin-top:10px;color:#ffe3a1;line-height:1.8}
+
+/* رفع مشکل ثبت نقطه در حالت GPS: لمس‌های بیرون پنجره باید به صحنه سه‌بعدی برسند. */
+#gpsModal.placement-active{background:transparent!important;pointer-events:none!important}
+#gpsModal.placement-active #gpsWindow{pointer-events:auto;position:fixed;top:8px;left:50%;transform:translateX(-50%);width:min(420px,calc(100vw - 20px));max-height:25vh;overflow:auto;padding:8px 12px}
+#gpsModal.placement-active #gpsTitle{font-size:15px;margin:0 0 5px}
+#gpsModal.placement-active #gpsStatus{font-size:11px;margin-top:5px}
+#gpsModal.placement-active #gpsPlacementActions{margin-top:6px}
 </style></head>
 <body>
 
@@ -1342,6 +1349,7 @@ function updateGpsVisibility(){
 function openGpsMenu(){if(!isCreatorAccount()||cameraMode!=="third")return;$("gpsModal").classList.remove("hidden");$("gpsChooseType").style.display="block";$("gpsPlacementActions").classList.remove("active");$("gpsStatus").textContent="نوع زمین را انتخاب کن.";}
 function closeGpsMenu(){if(landPlacementType)cancelLandPlacement();$("gpsModal").classList.add("hidden");}
 function cancelLandPlacement(){
+ $("gpsModal").classList.remove("placement-active");
  landPlacementType=null;landPlacementPoints=[];
  if(world3d&&landPreviewLine){world3d.scene.remove(landPreviewLine);landPreviewLine.geometry.dispose();landPreviewLine.material.dispose();landPreviewLine=null;}
  $("gpsPlacementActions").classList.remove("active");$("gpsChooseType").style.display="block";$("gpsStatus").textContent="عملیات ساخت لغو شد.";
@@ -1349,6 +1357,8 @@ function cancelLandPlacement(){
 function startLandPlacement(type){
  if(!isCreatorAccount()||!builderToken){$("gpsStatus").textContent="ابتدا رمز ساخت را فعال کن.";return;}
  landPlacementType=type;landPlacementPoints=[];
+ // پس‌زمینه مودال در زمان انتخاب نقطه لمس‌پذیر نباشد؛ پنجره کنترل به بالای صفحه منتقل می‌شود.
+ $("gpsModal").classList.add("placement-active");
  $("gpsChooseType").style.display="none";$("gpsPlacementActions").classList.add("active");
  $("gpsStatus").textContent="روی زمین شهر ضربه بزن و حداقل سه نقطه مشخص کن؛ خط قرمز نقاط را به هم وصل می‌کند.";
 }
