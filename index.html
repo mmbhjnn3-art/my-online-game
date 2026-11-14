@@ -1432,7 +1432,8 @@ function landDraftMeasure(a,b,index){
  let angle=Math.atan2(right,forward)*180/Math.PI;
  // نمایش مطابق درجه‌بندی GPS بازی: از ۹- تا ۹+ درجه.
  angle=Math.max(-9,Math.min(9,angle));
- return {angle:Math.round(angle),distance:len};
+ // درجه بدون اعشار و فاصله برحسب متر کامل محاسبه می‌شود.
+ return {angle:Math.round(angle),distance:Math.round(len)};
 }
 function makeLandMeasureSprite(text){
  const cv=document.createElement("canvas");cv.width=512;cv.height=128;
@@ -1463,9 +1464,12 @@ function redrawLandDraft(){
   const a=landPlacementPoints[lastIndex-1],b=landPlacementPoints[lastIndex];
   const measure=landDraftMeasure(a,b,lastIndex),angle=measure.angle;
   const angleText=angle>0?"+"+angle+"°":angle<0?angle+"°":"0°";
+  // طول فقط به متر کامل نمایش داده می‌شود؛ مختصات نقطه نیز هنگام ثبت/جابجایی به واحد کامل گرد می‌شود.
   const distanceText=Math.round(measure.distance);
   const label=makeLandMeasureSprite("طول: "+distanceText+" متر  |  زاویه: "+angleText);
-  label.position.set(b[0]+7,14,b[1]-7);landPointGroup.add(label);
+  // برچسب کنار نقطه زردِ جدید قرار می‌گیرد، نه روی وسط خط اندازه‌گیری.
+  const dx=b[0]-a[0],dz=b[1]-a[1],len=Math.hypot(dx,dz)||1;
+  label.position.set(b[0]-(dz/len)*12,14,b[1]+(dx/len)*12);landPointGroup.add(label);
   $("gpsStatus").textContent="نقاط: "+landPlacementPoints.length+" · طول: "+distanceText+" متر · زاویه حرکت: "+angleText+" · چپ منفی / راست مثبت · نقطه زرد آخر را جابه‌جا کن.";
  }else if(landPlacementPoints.length===1){
   $("gpsStatus").textContent="نقاط: ۱ · نقطه بعدی را برای اندازه‌گیری زاویه مشخص کن.";
