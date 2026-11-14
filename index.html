@@ -154,6 +154,21 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
 #gpsModal.placement-active #gpsTitle{font-size:15px;margin:0 0 5px}
 #gpsModal.placement-active #gpsStatus{font-size:11px;margin-top:5px}
 #gpsModal.placement-active #gpsPlacementActions{margin-top:6px}
+
+/* GPS land editor: in-game dialogs, visible draggable vertices */
+#landGpsDialog{position:fixed;inset:0;z-index:250;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(4,12,10,.72)}
+#landGpsDialog.hidden{display:none!important}
+#landGpsDialog .lg-card{width:min(430px,94vw);max-height:82vh;overflow:auto;background:#17372d;color:#fff5dc;border:2px solid #ffd166;border-radius:18px;padding:18px;box-shadow:0 16px 48px #000b}
+#landGpsDialog h3{margin:0 0 12px;color:#ffd166;font-size:20px}
+#landGpsDialog p{line-height:1.8;margin:8px 0 14px}
+#landGpsDialog label{display:block;margin:10px 0 5px;font-weight:700}
+#landGpsDialog input,#landGpsDialog select{width:100%;padding:12px;border-radius:10px;border:1px solid #789b87;background:#fff;color:#17251f;font-size:17px}
+#landGpsDialog .lg-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+#landGpsDialog button{flex:1;min-height:44px;border:0;border-radius:10px;padding:9px 12px;font-weight:800}
+#landGpsDialog .lg-primary{background:#ffd166;color:#18352b}
+#landGpsDialog .lg-secondary{background:#315447;color:#fff}
+#landGpsDialog .lg-danger{background:#a93636;color:#fff}
+.gps-point-marker{cursor:grab}
 </style></head>
 <body>
 
@@ -390,6 +405,28 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
      </div>
      <div id="gpsStatus">برای شروع، نوع زمین را انتخاب کن.</div>
      <button type="button" id="gpsCloseButton" class="secondary full" style="margin-top:10px">بستن</button>
+    </div>
+   </div>
+
+   <div id="landGpsDialog" class="hidden" role="dialog" aria-modal="true" aria-labelledby="landGpsDialogTitle">
+    <div class="lg-card">
+     <h3 id="landGpsDialogTitle">مدیریت زمین</h3>
+     <p id="landGpsDialogMessage"></p>
+     <div id="landGpsEditFields">
+      <label for="landGpsType">نوع زمین</label>
+      <select id="landGpsType">
+       <option value="agricultural">کشاورزی</option>
+       <option value="residential">مسکونی</option>
+       <option value="industrial">صنعتی</option>
+      </select>
+      <label for="landGpsPrice">قیمت زمین (تومان)</label>
+      <input id="landGpsPrice" type="number" min="1" step="1" inputmode="numeric" placeholder="مثلاً 500000">
+     </div>
+     <div class="lg-actions">
+      <button id="landGpsDialogConfirm" class="lg-primary" type="button">ذخیره تغییرات</button>
+      <button id="landGpsDialogDelete" class="lg-danger" type="button">حذف زمین</button>
+      <button id="landGpsDialogCancel" class="lg-secondary" type="button">بستن</button>
+     </div>
     </div>
    </div>
    <div class="joy-wrap">
@@ -771,6 +808,8 @@ function applyRealtimeMessage(data){
   landPlots=Array.isArray(data.plots)?data.plots:[];syncLandPlots3D();
  }else if(data.type==="land_plot"||data.type==="land_plot_updated"){
   if(data.plot)upsertLandPlot(data.plot);
+ }else if(data.type==="land_plot_deleted"){
+  landPlots=landPlots.filter(p=>Number(p.id)!==Number(data.plot_id));syncLandPlots3D();
  }else if(data.type==="mayor_status"){
   const target=onlinePlayers.find(p=>Number(p.id)===Number(data.player_id));if(target)target.is_mayor=!!data.is_mayor;
   if(account&&(Number(account.id)===Number(data.player_id)||account.name===data.player_name)){isCurrentMayor=!!data.is_mayor;delegatedBuilderAccess=!!data.is_mayor;if(!data.is_mayor)builderToken=null;updateBuilderVisibility();render();}
@@ -900,7 +939,7 @@ function syncFacingFromYaw(){
  playerFacingY=-Math.cos(lookYaw);
 }
 let roadTiles=[],builderToken=null,builderMode=false,rotateRoadMode=false;
-let landPlots=[],landPlacementType=null,landPlacementPoints=[],landPreviewLine=null;
+let landPlots=[],landPlacementType=null,landPlacementPoints=[],landPreviewLine=null,landPointGroup=null,landDraggingLastPoint=false,landDialogAction=null,landDialogPlotId=null;
 let isCurrentMayor=false;
 let mapMarkers=[], mapMode="none", mapCanvas=$("mapCanvas"), mapCtx=mapCanvas.getContext("2d");
 let adminPlayersCache=[];
@@ -1348,10 +1387,14 @@ function updateGpsVisibility(){
 }
 function openGpsMenu(){if(!isCreatorAccount()||cameraMode!=="third")return;$("gpsModal").classList.remove("hidden");$("gpsChooseType").style.display="block";$("gpsPlacementActions").classList.remove("active");$("gpsStatus").textContent="نوع زمین را انتخاب کن.";}
 function closeGpsMenu(){if(landPlacementType)cancelLandPlacement();$("gpsModal").classList.add("hidden");}
+function clearLandDraftVisuals(){
+ if(!world3d)return;
+ if(landPreviewLine){world3d.scene.remove(landPreviewLine);landPreviewLine.geometry.dispose();landPreviewLine.material.dispose();landPreviewLine=null;}
+ if(landPointGroup){world3d.scene.remove(landPointGroup);landPointGroup.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();});landPointGroup=null;}
+}
 function cancelLandPlacement(){
  $("gpsModal").classList.remove("placement-active");
- landPlacementType=null;landPlacementPoints=[];
- if(world3d&&landPreviewLine){world3d.scene.remove(landPreviewLine);landPreviewLine.geometry.dispose();landPreviewLine.material.dispose();landPreviewLine=null;}
+ landPlacementType=null;landPlacementPoints=[];landDraggingLastPoint=false;clearLandDraftVisuals();
  $("gpsPlacementActions").classList.remove("active");$("gpsChooseType").style.display="block";$("gpsStatus").textContent="عملیات ساخت لغو شد.";
 }
 function startLandPlacement(type){
@@ -1365,18 +1408,39 @@ function startLandPlacement(type){
 async function finishLandPlacement(){
  if(!isCreatorAccount()||!builderToken||!landPlacementType||landPlacementPoints.length<3){$("gpsStatus").textContent="حداقل سه نقطه برای ساخت زمین لازم است.";return;}
  if(landPreviewLine){world3d.scene.remove(landPreviewLine);landPreviewLine.geometry.dispose();landPreviewLine.material.dispose();}
- const closedPts=landPlacementPoints.map(v=>new THREE.Vector3(v[0],2,v[1]));closedPts.push(closedPts[0].clone());
- landPreviewLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints(closedPts),new THREE.LineBasicMaterial({color:0xff2020}));world3d.scene.add(landPreviewLine);
  try{const d=await roadAction("/land-plots",{land_type:landPlacementType,points:landPlacementPoints});if(d.plot)upsertLandPlot(d.plot);cancelLandPlacement();$("gpsStatus").textContent="زمین ساخته شد و برای همه بازیکنان این سرور نمایش داده می‌شود.";await refreshLandPlots();}
  catch(e){$("gpsStatus").textContent=e.message||"ساخت زمین انجام نشد.";}
+}
+function redrawLandDraft(){
+ if(!world3d)return;
+ if(landPreviewLine){world3d.scene.remove(landPreviewLine);landPreviewLine.geometry.dispose();landPreviewLine.material.dispose();landPreviewLine=null;}
+ if(landPointGroup){world3d.scene.remove(landPointGroup);landPointGroup.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();});landPointGroup=null;}
+ landPointGroup=new THREE.Group();
+ const pts=landPlacementPoints.map(v=>new THREE.Vector3(v[0],2.8,v[1]));
+ if(pts.length>1){landPreviewLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0xff2020,linewidth:3}));world3d.scene.add(landPreviewLine);}
+ landPlacementPoints.forEach((v,i)=>{
+  const last=i===landPlacementPoints.length-1;
+  const marker=new THREE.Mesh(new THREE.SphereGeometry(last?5.2:4.2,16,12),new THREE.MeshBasicMaterial({color:last?0xffd166:0xff3030,depthTest:false}));
+  marker.position.set(v[0],4.2,v[1]);marker.userData.draftPointIndex=i;landPointGroup.add(marker);
+ });
+ world3d.scene.add(landPointGroup);
+}
+function hitLastDraftPoint(clientX,clientY){
+ if(!world3d||!landPointGroup||!landPlacementPoints.length)return false;
+ const c3=$("city3dCanvas"),r=c3.getBoundingClientRect();
+ world3d.pointer.set(((clientX-r.left)/r.width)*2-1,-((clientY-r.top)/r.height)*2+1);world3d.raycaster.setFromCamera(world3d.pointer,world3d.camera);
+ return world3d.raycaster.intersectObject(landPointGroup,true).some(h=>h.object.userData.draftPointIndex===landPlacementPoints.length-1);
 }
 function addLandPlacementPoint(point){
  if(!landPlacementType||!world3d)return;
  landPlacementPoints.push([Number(point.x.toFixed(2)),Number(point.z.toFixed(2))]);
- if(landPreviewLine){world3d.scene.remove(landPreviewLine);landPreviewLine.geometry.dispose();landPreviewLine.material.dispose();}
- const pts=landPlacementPoints.map(v=>new THREE.Vector3(v[0],2,v[1]));
- if(pts.length>1){landPreviewLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0xff2020}));world3d.scene.add(landPreviewLine);}
- $("gpsStatus").textContent="نقاط ثبت‌شده: "+landPlacementPoints.length+" · حداقل سه نقطه لازم است.";
+ redrawLandDraft();
+ $("gpsStatus").textContent="نقاط ثبت‌شده: "+landPlacementPoints.length+" · نقطه زرد آخر را می‌توانی جابه‌جا کنی.";
+}
+function moveLastLandPlacementPoint(point){
+ if(!landPlacementPoints.length||!point)return;
+ landPlacementPoints[landPlacementPoints.length-1]=[Number(point.x.toFixed(2)),Number(point.z.toFixed(2))];
+ redrawLandDraft();
 }
 function upsertLandPlot(plot){
  const i=landPlots.findIndex(p=>Number(p.id)===Number(plot.id));if(i>=0)landPlots[i]=plot;else landPlots.push(plot);syncLandPlots3D();
@@ -1431,18 +1495,55 @@ function hitLandSign(clientX,clientY){
  const hits=world3d.raycaster.intersectObject(world3d.landGroup,true);
  for(const hit of hits){let o=hit.object;while(o&&o!==world3d.landGroup){if(o.userData&&o.userData.plotId)return Number(o.userData.plotId);o=o.parent;}}return null;
 }
+function openLandGpsDialog({title,message,action,plot=null,showFields=false,showDelete=false,confirmText="تأیید"}){
+ landDialogAction=action;landDialogPlotId=plot?Number(plot.id):null;
+ $("landGpsDialogTitle").textContent=title;$("landGpsDialogMessage").textContent=message||"";
+ $("landGpsEditFields").style.display=showFields?"block":"none";
+ $("landGpsDialogDelete").style.display=showDelete?"block":"none";
+ $("landGpsDialogConfirm").textContent=confirmText;
+ $("landGpsDialog").classList.remove("hidden");
+ if(plot&&showFields){$("landGpsType").value=plot.land_type||"residential";$("landGpsPrice").value=plot.price==null?"":String(plot.price);}
+}
+function closeLandGpsDialog(){ $("landGpsDialog").classList.add("hidden");landDialogAction=null;landDialogPlotId=null; }
 async function interactLandPlot(plotId){
  const plot=landPlots.find(p=>Number(p.id)===Number(plotId));if(!plot)return;
- if(isCreatorAccount()&&builderToken&&!plot.sold){
-  const raw=prompt("قیمت زمین به تومان را وارد کن:");if(raw===null)return;
-  const price=Number(String(raw).replace(/[٬,\s]/g,""));if(!Number.isSafeInteger(price)||price<1){alert("قیمت معتبر نیست.");return;}
-  try{const d=await roadAction("/land-plots/price",{plot_id:plotId,price});upsertLandPlot(d.plot);alert("قیمت زمین ثبت شد.");}catch(e){alert(e.message);}return;
+ if(isCreatorAccount()&&builderToken){
+  openLandGpsDialog({title:"مدیریت زمین",message:plot.sold?"این زمین فروخته شده است. می‌توانی آن را حذف کنی.":"نوع زمین و قیمت را تغییر بده یا زمین را حذف کن.",action:"edit",plot,showFields:!plot.sold,showDelete:true,confirmText:"ذخیره تغییرات"});return;
  }
  if(isCurrentMayor&&!plot.sold&&plot.price){
-  if(!confirm("خرید این زمین به قیمت "+Number(plot.price).toLocaleString("fa-IR")+" تومان؟"))return;
-  try{const d=await api("/land-plots/buy",{plot_id:plotId});if(d.plot)upsertLandPlot(d.plot);if(d.balance!==undefined){account.balance=d.balance;render();save();}alert("زمین با موفقیت خریداری شد.");}catch(e){alert(e.message);}return;
+  openLandGpsDialog({title:"خرید زمین",message:"آیا این زمین را به قیمت "+Number(plot.price).toLocaleString("fa-IR")+" تومان خریداری می‌کنی؟",action:"buy",plot,confirmText:"تأیید خرید"});return;
  }
- alert(plot.sold?"این زمین فروخته شده است.":(plot.price?"فقط شهردار همین شهر می‌تواند این زمین را بخرد.":"هنوز قیمت این زمین تعیین نشده است."));
+ openLandGpsDialog({title:"اطلاعات زمین",message:plot.sold?"این زمین فروخته شده است.":(plot.price?"فقط شهردار همین شهر می‌تواند این زمین را بخرد.":"هنوز قیمت این زمین تعیین نشده است."),action:"info",plot,confirmText:"متوجه شدم"});
+}
+async function submitLandGpsDialog(){
+ const action=landDialogAction,plotId=landDialogPlotId,btn=$("landGpsDialogConfirm");
+ if(!action||!plotId){closeLandGpsDialog();return;}
+ btn.disabled=true;
+ try{
+  if(action==="edit"){
+   const priceText=$("landGpsPrice").value.trim();
+   const price=priceText===""?null:Number(priceText);
+   if(price!==null&&(!Number.isSafeInteger(price)||price<1||price>10000000000))throw new Error("قیمت باید عدد صحیح و بیشتر از صفر باشد.");
+   const d=await roadAction("/land-plots/update",{plot_id:plotId,land_type:$("landGpsType").value,price});
+   if(d.plot)upsertLandPlot(d.plot);
+   closeLandGpsDialog();$("gpsStatus").textContent="تغییرات زمین ذخیره شد.";
+  }else if(action==="buy"){
+   const d=await api("/land-plots/buy",{plot_id:plotId});if(d.plot)upsertLandPlot(d.plot);
+   if(d.balance!==undefined){account.balance=d.balance;render();save();}
+   closeLandGpsDialog();openLandGpsDialog({title:"خرید موفق",message:"زمین با موفقیت خریداری شد.",action:"info",confirmText:"بستن"});
+  }else closeLandGpsDialog();
+ }catch(e){$("landGpsDialogMessage").textContent=e.message||"عملیات انجام نشد.";}
+ finally{btn.disabled=false;}
+}
+async function deleteLandGpsPlot(){
+ if(!landDialogPlotId)return;
+ const btn=$("landGpsDialogDelete");btn.disabled=true;
+ try{
+  await roadAction("/land-plots/delete",{plot_id:landDialogPlotId});
+  landPlots=landPlots.filter(p=>Number(p.id)!==Number(landDialogPlotId));syncLandPlots3D();
+  closeLandGpsDialog();$("gpsStatus").textContent="زمین حذف شد.";
+ }catch(e){$("landGpsDialogMessage").textContent=e.message||"حذف زمین انجام نشد.";}
+ finally{btn.disabled=false;}
 }
 async function refreshRoads(){
  if(!account||!authToken)return;
@@ -2110,7 +2211,10 @@ if(c3el){
   if(!immersiveActive||!account)return;
   c3el.setPointerCapture(e.pointerId);
   touchLookMoved=false;
-  if(landPlacementType){const point=getGroundPoint(e.clientX,e.clientY);if(point)addLandPlacementPoint(point);touchLookActive=false;return;}
+  if(landPlacementType){
+   if(hitLastDraftPoint(e.clientX,e.clientY)){landDraggingLastPoint=true;touchLookActive=false;return;}
+   const point=getGroundPoint(e.clientX,e.clientY);if(point)addLandPlacementPoint(point);touchLookActive=false;return;
+  }
   const clickedPlot=hitLandSign(e.clientX,e.clientY);if(clickedPlot){interactLandPlot(clickedPlot);touchLookActive=false;return;}
   // اگر دقیقاً روی مدل چاه کلیک شد → باز کردن چاه
   if(hitWell3D(e.clientX,e.clientY)){
@@ -2123,6 +2227,7 @@ if(c3el){
   touchLookLastY=e.clientY;
  });
  c3el.addEventListener("pointermove",e=>{
+  if(landDraggingLastPoint){const point=getGroundPoint(e.clientX,e.clientY);if(point)moveLastLandPlacementPoint(point);return;}
   if(!immersiveActive||!touchLookActive||!c3el.hasPointerCapture(e.pointerId))return;
   const dx=e.clientX-touchLookLastX;
   const dy=e.clientY-touchLookLastY;
@@ -2133,6 +2238,7 @@ if(c3el){
   syncFacingFromYaw();
  });
  c3el.addEventListener("pointerup",e=>{
+  if(landDraggingLastPoint){landDraggingLastPoint=false;touchLookActive=false;touchLookMoved=false;return;}
   if(landPlacementType){touchLookActive=false;touchLookMoved=false;return;}
   // اگر حرکت کم بود و روی چاه رها شد، دوباره امتحان کن
   if(immersiveActive&&!touchLookMoved&&hitWell3D(e.clientX,e.clientY)){
@@ -2142,7 +2248,7 @@ if(c3el){
   touchLookMoved=false;
   save();
  });
- c3el.addEventListener("pointercancel",()=>{touchLookActive=false;touchLookMoved=false;});
+ c3el.addEventListener("pointercancel",()=>{landDraggingLastPoint=false;touchLookActive=false;touchLookMoved=false;});
 }
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"){moveX=0;moveY=0;pauseGameClock();}else if(account && !$("game").classList.contains("hidden")){resumeGameClock();}});
 
@@ -2167,6 +2273,10 @@ $("gpsButton").onclick=openGpsMenu;
 $("gpsCloseButton").onclick=closeGpsMenu;
 $("gpsCancelButton").onclick=cancelLandPlacement;
 $("gpsFinishButton").onclick=finishLandPlacement;
+$("landGpsDialogConfirm").onclick=submitLandGpsDialog;
+$("landGpsDialogDelete").onclick=deleteLandGpsPlot;
+$("landGpsDialogCancel").onclick=closeLandGpsDialog;
+$("landGpsDialog").addEventListener("click",e=>{if(e.target===$("landGpsDialog"))closeLandGpsDialog();});
 document.querySelectorAll("[data-land-type]").forEach(b=>b.addEventListener("click",()=>startLandPlacement(b.dataset.landType)));
 canvas.addEventListener("click",e=>{
  if(immersiveActive||!account||!landPlots.length)return;
