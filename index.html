@@ -1506,14 +1506,19 @@ function makeLandTexture(type){
 }
 function createLandSign(plot){
  const group=new THREE.Group();const post=new THREE.Mesh(new THREE.BoxGeometry(3,22,3),new THREE.MeshStandardMaterial({color:0x704523}));post.position.y=11;group.add(post);
- const cv=document.createElement("canvas");cv.width=512;cv.height=256;const cx=cv.getContext("2d");
- cx.fillStyle="#17372d";cx.fillRect(0,0,512,256);cx.strokeStyle="#ffd166";cx.lineWidth=12;cx.strokeRect(7,7,498,242);
+ const cv=document.createElement("canvas");cv.width=512;cv.height=320;const cx=cv.getContext("2d");
+ cx.fillStyle="#17372d";cx.fillRect(0,0,512,320);cx.strokeStyle="#ffd166";cx.lineWidth=12;cx.strokeRect(7,7,498,306);
  cx.fillStyle="#fff2c4";cx.textAlign="center";cx.font="bold 42px sans-serif";
  const names={agricultural:"زمین کشاورزی",residential:"زمین مسکونی",industrial:"زمین صنعتی"};cx.fillText(names[plot.land_type]||"زمین",256,68);
  cx.font="bold 32px sans-serif";let line=plot.sold?"فروخته شد به شهردار "+(plot.sold_city||""):(plot.price?"قیمت: "+Number(plot.price).toLocaleString("fa-IR")+" تومان":"برای تعیین قیمت کلیک کن");
  cx.fillText(line.slice(0,26),256,150);
+ // مساحت واقعی چندضلعی زمین از مختصات نقاط آن (فرمول کفشدوزکی)
+ const landPoints=Array.isArray(plot.points)?plot.points:[];let twiceArea=0;
+ for(let i=0;i<landPoints.length;i++){const a=landPoints[i],b=landPoints[(i+1)%landPoints.length];if(!Array.isArray(a)||!Array.isArray(b))continue;twiceArea+=Number(a[0])*Number(b[1])-Number(b[0])*Number(a[1]);}
+ const areaM2=landPoints.length>=3?Math.round(Math.abs(twiceArea)/2):0;
+ cx.font="bold 30px sans-serif";cx.fillText("مساحت: "+areaM2.toLocaleString("fa-IR")+" متر مربع",256,240);
  const tex=new THREE.CanvasTexture(cv);tex.colorSpace=THREE.SRGBColorSpace;
- const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthTest:false}));sprite.scale.set(42,21,1);sprite.position.y=35;sprite.userData.plotId=Number(plot.id);
+ const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthTest:false}));sprite.scale.set(42,26.25,1);sprite.position.y=37.5;sprite.userData.plotId=Number(plot.id);
  group.add(sprite);group.userData.plotId=Number(plot.id);group.position.set(plot.center_x,0,plot.center_y);return group;
 }
 function syncLandPlots3D(){
