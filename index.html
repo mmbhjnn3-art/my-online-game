@@ -1418,10 +1418,12 @@ function landDraftMeasure(a,b,index){
   const prev=landPlacementPoints[index-1],before=landPlacementPoints[index-2];
   const hx=prev[0]-before[0],hz=prev[1]-before[1],hl=Math.hypot(hx,hz);
   if(hl>0.001){fx=hx/hl;fz=hz/hl;}
- }else if(world3d&&world3d.camera){
-  // برای اولین ضلع، جهت روبه‌روی دوربین مبنای صفر درجه است.
-  const dir=new THREE.Vector3();world3d.camera.getWorldDirection(dir);
-  const len=Math.hypot(dir.x,dir.z);if(len>0.001){fx=dir.x/len;fz=dir.z/len;}
+ }else{
+  // برای اولین ضلع، امتداد از موقعیت کاراکتر به نقطه قبلی مبنای صفر درجه است؛ دوربین دخالتی ندارد.
+  const playerX=world3d&&world3d.localPlayer?world3d.localPlayer.position.x:(Number(account?.playerX)||0);
+  const playerZ=world3d&&world3d.localPlayer?world3d.localPlayer.position.z:(Number(account?.playerY)||0);
+  const hx=a[0]-playerX,hz=a[1]-playerZ,hl=Math.hypot(hx,hz);
+  if(hl>0.001){fx=hx/hl;fz=hz/hl;}
  }
  const len=Math.hypot(dx,dz);
  if(len<0.001)return {angle:0,distance:0};
