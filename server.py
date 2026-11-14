@@ -197,6 +197,17 @@ def init_db():
             ON map_markers(server_id, id)
         """)
         db.execute("""
+            CREATE TABLE IF NOT EXISTS bus_stops (
+                id BIGSERIAL PRIMARY KEY,
+                server_id TEXT NOT NULL,
+                x DOUBLE PRECISION NOT NULL,
+                y DOUBLE PRECISION NOT NULL,
+                created_at BIGINT NOT NULL,
+                created_by BIGINT REFERENCES players(id) ON DELETE SET NULL
+            )
+        """)
+        db.execute("CREATE INDEX IF NOT EXISTS idx_bus_stops_server ON bus_stops(server_id, id)")
+        db.execute("""
             CREATE TABLE IF NOT EXISTS land_plots (
                 id BIGSERIAL PRIMARY KEY,
                 server_id TEXT NOT NULL,
@@ -518,6 +529,11 @@ class MapMarkerDeleteIn(BaseModel):
     marker_id: int = Field(ge=1)
 
 
+class BusStopCreateIn(BaseModel):
+    x: float = Field(ge=-CITY_LIMIT, le=CITY_LIMIT)
+    y: float = Field(ge=-CITY_LIMIT, le=CITY_LIMIT)
+
+
 class LandPlotCreateIn(BaseModel):
     land_type: str = Field(pattern="^(agricultural|residential|industrial)$")
     points: list[list[float]] = Field(min_length=3, max_length=100)
@@ -620,6 +636,14 @@ refresh();setInterval(refresh,5000);setInterval(tick,1000);
 </script></body></html>"""
     from fastapi.responses import HTMLResponse
     return HTMLResponse(fallback, status_code=200)
+
+
+@app.get("/busstop-model.glb")
+def busstop_model_file():
+    model_path = Path(__file__).with_name("busstop-model.glb")
+    if not model_path.exists():
+        raise HTTPException(404, "مدل ایستگاه اتوبوس پیدا نشد.")
+    return FileResponse(model_path, media_type="model/gltf-binary", headers={"Cache-Control": "public, max-age=31536000"})
 
 
 @app.get("/update-screen.jpg")
@@ -1551,6 +1575,37 @@ async def buy_land_plot(
         result = serialize_land_plot(updated)
     await ws_send_group(sid, {"type": "land_plot_updated", "plot": result})
     return {"ok": True, "plot": result, "balance": state["balance"]}
+
+
+@app.get("/api/bus-stops")
+def get_bus_stops(authorization: str | None = Header(default=None)):
+    """Bus stops are visible to all authenticated players in the current server."""
+    with connect() as db:
+        player = current_player(db, authorization)
+        rows = db.execute(
+            "SELECT id, x, y, created_at FROM bus_stops WHERE server_id=? ORDER BY id",
+            (player["session_server"],)
+        ).fetchall()
+    return {"bus_stops": rows}
+
+
+@app.post("/api/bus-stops")
+async def create_bus_stop(
+    data: BusStopCreateIn,
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None)
+):
+    """Only the creator account may place a bus stop model on the city map."""
+    with connect() as db:
+        player = require_builder(db, authorization, x_builder_token)
+        now = int(time.time())
+        row = db.execute(
+            "INSERT INTO bus_stops(server_id, x, y, created_at, created_by) VALUES(?,?,?,?,?) RETURNING id",
+            (player["session_server"], data.x, data.y, now, player["id"])
+        ).fetchone()
+        bus_stop = {"id": row["id"], "x": data.x, "y": data.y, "created_at": now}
+    await ws_send_group(player["session_server"], {"type": "bus_stop", "bus_stop": bus_stop})
+    return {"ok": True, "bus_stop": bus_stop}
 
 
 @app.get("/api/map-markers")
