@@ -358,6 +358,7 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
      <button id="builderButton" class="secondary" type="button">ساخت</button>
      <button id="asphaltToolButton" class="secondary hidden" type="button">🛣️ آسفالت</button>
      <button id="rotateRoadButton" class="secondary hidden" type="button">↻ چرخاندن آسفالت</button>
+     <button id="busStopToolButton" class="secondary hidden" type="button">🚏 ایستگاه اتوبوس</button>
     </div>
     <div id="builderHint" class="notice">ابزار ساخت فقط برای حساب سازنده بازی فعال است.</div>
     <div id="adminManagementSection" style="margin-top:10px;border-top:1px solid #42685a;padding-top:10px">
@@ -804,6 +805,8 @@ function applyRealtimeMessage(data){
   const marker=data.marker;
   if(marker)mapMarkers=mapMarkers.filter(m=>Number(m.id)!==Number(marker.id));
   drawOverviewMap();
+ }else if(data.type==="bus_stop"){
+  const s=data.bus_stop;if(s&&!busStops.some(v=>Number(v.id)===Number(s.id)))busStops.push(s);drawOverviewMap();drawCity();syncBusStops3D();
  }else if(data.type==="land_plots_snapshot"){
   landPlots=Array.isArray(data.plots)?data.plots:[];syncLandPlots3D();
  }else if(data.type==="land_plot"||data.type==="land_plot_updated"){
@@ -868,7 +871,7 @@ function startRealtime(){
    try{ws.send(JSON.stringify({type:"ping"}));}catch(e){try{ws.close();}catch(_){}}
   },15000);
   $("cityMsg").textContent="اتصال زنده برقرار شد.";
-  syncState();refreshRoads();refreshMapMarkers();
+  syncState();refreshRoads();refreshMapMarkers();refreshBusStops();
  };
  ws.onmessage=e=>{try{const message=JSON.parse(e.data);if(message.type==="pong")realtimeLastPong=Date.now();applyRealtimeMessage(message);}catch(err){}};
  ws.onerror=()=>{$("cityMsg").textContent="ارتباط زنده ناپایدار است؛ تلاش برای اتصال مجدد..."};
@@ -907,7 +910,7 @@ function showGame(){
  $("auth").classList.add("hidden");$("game").classList.remove("hidden");
  resumeGameClock();
  document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
- render();stopTimers();updateBuilderVisibility();refreshBuilderAccess();refreshRoads();refreshMapMarkers();refreshLandPlots();drawCity();drawOverviewMap();if(raf)cancelAnimationFrame(raf);lastMove=Date.now();raf=requestAnimationFrame(movePlayer);
+ render();stopTimers();updateBuilderVisibility();refreshBuilderAccess();refreshRoads();refreshMapMarkers();refreshBusStops();refreshLandPlots();drawCity();drawOverviewMap();if(raf)cancelAnimationFrame(raf);lastMove=Date.now();raf=requestAnimationFrame(movePlayer);
  startRealtime();clockTimer=setInterval(renderClock,250);saveTimer=setInterval(()=>{save();syncState()},5000);
  if(wellTimer)clearInterval(wellTimer);refreshWell();wellTimer=setInterval(refreshWell,3000);
  setIntervalSafeSync();
@@ -942,6 +945,7 @@ let roadTiles=[],builderToken=null,builderMode=false,rotateRoadMode=false;
 let landPlots=[],landPlacementType=null,landPlacementPoints=[],landPreviewLine=null,landPointGroup=null,landDraggingLastPoint=false,landDialogAction=null,landDialogPlotId=null;
 let isCurrentMayor=false;
 let mapMarkers=[], mapMode="none", mapCanvas=$("mapCanvas"), mapCtx=mapCanvas.getContext("2d");
+let busStops=[],busStopModelPromise=null,cityTreeMeshes=[];
 let adminPlayersCache=[];
 const CAMERA_MODE_LABELS={top:"نمای بالا",third:"سوم‌شخص",first:"اول‌شخص"};
 let cameraBaseW=560,cameraBaseH=390,immersiveActive=false;
@@ -1098,12 +1102,13 @@ function initWorld3D(){
   const ang=(i/48)*Math.PI*2,r=280+((i*97)%900);
   const tx=Math.cos(ang)*r,tz=Math.sin(ang)*r;
   if(Math.hypot(tx,tz+145)<80)continue;
+  if((busStops||[]).some(s=>Math.hypot(tx-Number(s.x),tz-Number(s.y))<48))continue;
   const tg=new THREE.Group();
   const trunk=new THREE.Mesh(new THREE.CylinderGeometry(3,5,22,6),treeMatTrunk);
   trunk.position.y=11;trunk.castShadow=true;tg.add(trunk);
   const leaf=new THREE.Mesh(new THREE.SphereGeometry(16,8,6),treeMatLeaf);
   leaf.position.y=28;leaf.castShadow=true;tg.add(leaf);
-  tg.position.set(tx,0,tz);scene.add(tg);
+  tg.position.set(tx,0,tz);scene.add(tg);cityTreeMeshes.push({mesh:tg,x:tx,y:tz});
  }
  // بازیکن محلی
  const localPlayer=createPlayerMesh("#2874bd","#f3c6a0");
@@ -1117,11 +1122,13 @@ function initWorld3D(){
  const roadsGroup=new THREE.Group();scene.add(roadsGroup);
  world3d={
   scene,camera,renderer,localPlayer,othersGroup,roadsGroup,wellG,
-  otherMeshes:new Map(),roadMeshes:new Map(),landMeshes:new Map(),landGroup:null,
+  otherMeshes:new Map(),roadMeshes:new Map(),landMeshes:new Map(),landGroup:null,busStopGroup:new THREE.Group(),busStopMeshes:new Map(),
   raycaster:new THREE.Raycaster(),
   pointer:new THREE.Vector2(),
   ready:true
  };
+ scene.add(world3d.busStopGroup);
+ syncBusStops3D();
  return world3d;
 }
 function hitWell3D(clientX,clientY){
@@ -1150,6 +1157,36 @@ function tryOpenWellFrom3D(){
  }
  openWell();
 }
+async function loadBusStopModel(){
+ if(busStopModelPromise)return busStopModelPromise;
+ busStopModelPromise=(async()=>{
+  const mod=await import("https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTFLoader.js");
+  const loader=new mod.GLTFLoader();
+  return await new Promise((resolve,reject)=>loader.load("/busstop-model.glb",g=>resolve(g.scene),undefined,reject));
+ })();
+ return busStopModelPromise;
+}
+async function syncBusStops3D(){
+ if(!world3d||!world3d.busStopGroup)return;
+ const signature=JSON.stringify((busStops||[]).map(s=>[s.id,s.x,s.y]));
+ if(world3d.busStopSignature===signature)return;
+ world3d.busStopSignature=signature;
+ world3d.busStopGroup.clear();world3d.busStopMeshes.clear();
+ if(!busStops.length)return;
+ try{
+  const template=await loadBusStopModel();
+  (busStops||[]).forEach(s=>{
+   const model=template.clone(true);
+   model.scale.setScalar(.1);
+   // Center the imported OBJ pivot and put its base on the ground.
+   model.position.set(1.16,0,0);
+   model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;if(o.material){const mats=Array.isArray(o.material)?o.material:[o.material];mats.forEach(m=>{m.side=THREE.DoubleSide;});}}});
+   const holder=new THREE.Group();holder.position.set(Number(s.x)||0,0,Number(s.y)||0);holder.add(model);
+   world3d.busStopGroup.add(holder);world3d.busStopMeshes.set(String(s.id),holder);
+  });
+ }catch(e){console.error("Bus stop model load failed",e);if($("cityMsg"))$("cityMsg").textContent="بارگذاری مدل ایستگاه اتوبوس انجام نشد؛ اتصال فایل مدل را بررسی کن.";}
+}
+function nearBusStop(x,y,radius=40){return (busStops||[]).some(s=>Math.hypot(Number(s.x)-x,Number(s.y)-y)<radius);}
 function syncRoads3D(){
  if(!world3d)return;
  const seen=new Set();
@@ -1378,7 +1415,8 @@ function updateBuilderVisibility(){
  $("adminManagementSection").classList.toggle("hidden",!isCreatorAccount());
  $("updateManagementSection").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  $("mapAddMarkerButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
- if(!allowed){$("mapAddMarkerButton").classList.add("hidden");builderToken=null;builderMode=false;rotateRoadMode=false;$("asphaltToolButton").classList.add("hidden");$("rotateRoadButton").classList.add("hidden");$("adminPlayersPanel").classList.add("hidden");$("adminPlayersButton").disabled=true;}
+ $("busStopToolButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
+ if(!allowed){$("mapAddMarkerButton").classList.add("hidden");$("busStopToolButton").classList.add("hidden");builderToken=null;builderMode=false;rotateRoadMode=false;$("asphaltToolButton").classList.add("hidden");$("rotateRoadButton").classList.add("hidden");$("adminPlayersPanel").classList.add("hidden");$("adminPlayersButton").disabled=true;}
 }
 function updateGpsVisibility(){
  const b=$("gpsButton");if(!b)return;
@@ -1622,6 +1660,10 @@ async function refreshRoads(){
   roadTiles=Array.isArray(d.tiles)?d.tiles.map(t=>({x:Number(t.x),y:Number(t.y),tile_type:t.tile_type||"asphalt",orientation:Number(t.orientation)||0})):[];
   drawCity();drawOverviewMap();
  }catch(e){/* تا اتصال بعدی، نقشه فعلی حفظ می‌شود. */}
+}
+async function refreshBusStops(){
+ if(!account||!authToken)return;
+ try{const d=await api("/bus-stops");busStops=Array.isArray(d.bus_stops)?d.bus_stops:[];cityTreeMeshes=cityTreeMeshes.filter(t=>{if(nearBusStop(t.x,t.y,48)){if(world3d)world3d.scene.remove(t.mesh);return false;}return true;});drawOverviewMap();drawCity();syncBusStops3D();}catch(e){/* retain the last known station list */}
 }
 async function refreshMapMarkers(){
  if(!account||!authToken)return;
@@ -1965,6 +2007,7 @@ function drawCity(){
    if(wx < -CITY_HALF+20 || wx > CITY_HALF-20 || wy < -CITY_HALF+20 || wy > CITY_HALF-20)continue;
    const treeTileX=Math.floor(wx/48),treeTileY=Math.floor(wy/48);
    if((roadTiles||[]).some(t=>Number(t.x)===treeTileX&&Number(t.y)===treeTileY))continue;
+   if(nearBusStop(wx,wy,42))continue;
    const x=wx-left,y=wy-top;
    if(x<-30||x>w+30||y<-30||y>h+30)continue;
    ctx.fillStyle="#0002";
@@ -1976,6 +2019,9 @@ function drawCity(){
    ctx.beginPath();ctx.arc(x-5,y-8,7,0,Math.PI*2);ctx.fill();
   }
  }
+
+ // ایستگاه‌های اتوبوس ثبت‌شده؛ درخت‌های زیر محدوده ایستگاه در بالا حذف شده‌اند.
+ (busStops||[]).forEach(s=>{const x=Number(s.x)-left,y=Number(s.y)-top;if(x<-50||x>w+50||y<-50||y>h+50)return;ctx.save();ctx.translate(x,y);ctx.fillStyle="#163b32";ctx.strokeStyle="#ffd166";ctx.lineWidth=2;ctx.fillRect(-22,-13,44,26);ctx.strokeRect(-22,-13,44,26);ctx.fillStyle="#ffd166";ctx.font="bold 19px Tahoma";ctx.textAlign="center";ctx.fillText("🚏",0,7);ctx.restore();});
 
  // چاه آب با ظاهر سنگی و واقعی‌تر؛ مختصات ثابت همان (0,-145) باقی می‌ماند.
  // تعامل خرید آب و منطق موجودی همچنان به همین نقطه متصل است.
@@ -2103,6 +2149,8 @@ function drawOverviewMap(){
  mapCtx.beginPath();mapCtx.arc(wx(0),wy(-145),Math.max(5,10*scale),0,Math.PI*2);mapCtx.fill();mapCtx.stroke();
  mapCtx.fillStyle="#fff";mapCtx.font="bold 12px Tahoma";mapCtx.textAlign="center";
  mapCtx.fillText("چاه آب",wx(0),wy(-145)-13);
+ // Bus stops are placed by the creator and shown on the map for every player.
+ (busStops||[]).forEach(s=>{const x=wx(Number(s.x)||0),y=wy(Number(s.y)||0);mapCtx.fillStyle="#163b32";mapCtx.strokeStyle="#ffd166";mapCtx.lineWidth=2;mapCtx.fillRect(x-9,y-7,18,14);mapCtx.strokeRect(x-9,y-7,18,14);mapCtx.fillStyle="#ffd166";mapCtx.font="bold 15px Tahoma";mapCtx.textAlign="center";mapCtx.fillText("🚏",x,y+5);});
  // Registered locations are shown on this map only, not in the playable city view.
  (mapMarkers||[]).forEach(m=>{
   const x=wx(Number(m.x)||0),y=wy(Number(m.y)||0);
@@ -2162,6 +2210,11 @@ $("mapAddMarkerButton").onclick=()=>{
  mapMode="marker";
  $("mapHint").textContent="نقطه مکان جدید را روی نقشه لمس کن؛ فقط سازنده می‌تواند مکان ثبت کند.";
 };
+$("busStopToolButton").onclick=()=>{
+ if(!isCreatorAccount()||!builderToken){alert("فقط سازنده بازی می‌تواند ایستگاه اتوبوس بسازد.");return;}
+ mapMode="busstop";$("mapModal").classList.remove("hidden");drawOverviewMap();
+ $("mapHint").textContent="روی نقطه دلخواه نقشه دوبعدی بزن تا ایستگاه اتوبوس همان‌جا قرار بگیرد. اگر درختی زیر آن باشد حذف می‌شود.";
+};
 $("mapClearTargetButton").onclick=()=>{
  if(!account)return;
  account.targetSet=false;account.targetX=null;account.targetY=null;
@@ -2181,6 +2234,16 @@ mapCanvas.addEventListener("pointerdown",async e=>{
   account.targetX=worldX;account.targetY=worldY;account.targetSet=true;
   mapMode="none";$("mapHint").textContent="مقصد روی نقشه ثبت شد؛ فلش جهت حرکت در شهر نمایش داده می‌شود.";
   drawOverviewMap();drawCity();save();syncState();return;
+ }
+ if(mapMode==="busstop"){
+  if(!isCreatorAccount()||!builderToken){mapMode="none";return;}
+  try{
+   const d=await roadAction("/bus-stops",{x:worldX,y:worldY});
+   if(d.bus_stop&&!busStops.some(s=>Number(s.id)===Number(d.bus_stop.id)))busStops.push(d.bus_stop);
+   mapMode="none";$("mapHint").textContent="ایستگاه اتوبوس در همین نقطه ثبت شد و برای همه بازیکنان این سرور نمایش داده می‌شود.";
+   drawOverviewMap();drawCity();syncBusStops3D();
+  }catch(err){$("mapHint").textContent=err.message||"ثبت ایستگاه انجام نشد.";}
+  return;
  }
  if(mapMode==="marker"){
   if(!isCreatorAccount()||!builderToken){mapMode="none";return;}
@@ -2550,17 +2613,17 @@ async function checkGameConnection(){
 startAnnouncementPolling();
 window.addEventListener("offline",showOfflineScreen);
 window.addEventListener("online",()=>{
- if(account&&authToken){scheduleRealtimeReconnect();refreshRoads();refreshMapMarkers();}
+ if(account&&authToken){scheduleRealtimeReconnect();refreshRoads();refreshMapMarkers();refreshBusStops();}
  checkGameConnection().then(()=>{
   if(!navigator.onLine)return;
   hideOfflineScreen();
-  if(account&&authToken){startRealtime();syncState();refreshRoads();refreshMapMarkers();}
+  if(account&&authToken){startRealtime();syncState();refreshRoads();refreshMapMarkers();refreshBusStops();}
  });
 });
 $("offlineRetry").addEventListener("click",()=>{
  if(!navigator.onLine){showOfflineScreen();return;}
  checkGameConnection().then(()=>{
-  if(offlineScreen.classList.contains("hidden")&&account&&authToken){startRealtime();syncState();refreshRoads();refreshMapMarkers();}
+  if(offlineScreen.classList.contains("hidden")&&account&&authToken){startRealtime();syncState();refreshRoads();refreshMapMarkers();refreshBusStops();}
  });
 });
 document.addEventListener("visibilitychange",()=>{
