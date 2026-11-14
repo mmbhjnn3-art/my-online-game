@@ -1416,7 +1416,7 @@ function syncLandPlots3D(){
   const pts=(plot.points||[]).map(p=>new THREE.Vector2(Number(p[0])-Number(plot.center_x),Number(p[1])-Number(plot.center_y)));if(pts.length<3)return;
   const shape=new THREE.Shape(pts),geo=new THREE.ShapeGeometry(shape);
   const mat=new THREE.MeshStandardMaterial({map:makeLandTexture(plot.land_type),color:0xffffff,roughness:.98,side:THREE.DoubleSide});
-  const mesh=new THREE.Mesh(geo,mat);mesh.rotation.x=Math.PI/2;mesh.position.y=1;mesh.receiveShadow=true;
+  const mesh=new THREE.Mesh(geo,mat);mesh.rotation.x=Math.PI/2;mesh.position.set(Number(plot.center_x)||0,1,Number(plot.center_y)||0);mesh.receiveShadow=true;
   const g=new THREE.Group();g.add(mesh);g.add(createLandSign(plot));world3d.landGroup.add(g);world3d.landMeshes.set(id,g);
  });
 }
