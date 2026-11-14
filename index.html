@@ -77,10 +77,7 @@ body.immersive-camera .world{flex:1;margin:0!important;border:0;border-radius:0;
 body.immersive-camera #cityCanvas{width:100%!important;height:100%!important;display:none!important}
 body.immersive-camera #city3dCanvas{display:block!important;width:100%!important;height:100%!important;position:absolute;inset:0}
 #city3dCanvas{display:none;touch-action:none;background:#1a3a2f}
-body.immersive-camera .joy-wrap{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:45;margin:0;background:#10271fcc;border-radius:20px;padding:8px 14px;border:1px solid #6c9b7f}
-#cameraExitBtn{display:none;position:fixed;top:50%;right:10px;transform:translateY(-50%);z-index:50;background:#1a3a2f;color:#ffd166;border:2px solid #ffd166;border-radius:14px;padding:14px 12px;font-size:13px;font-weight:bold;writing-mode:vertical-rl;text-orientation:mixed;cursor:pointer;box-shadow:0 6px 20px #0008}
-body.immersive-camera #cameraExitBtn{display:block}
-#cameraExitBtn:active{transform:translateY(-50%) scale(.96)}
+body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:none;z-index:45;margin:0;padding:0;background:transparent;border:0;border-radius:0}
 /* افزوده‌شده: صفحه اختصاصی هنگام قطع ارتباط */
 #offlineScreen{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;overflow:auto;background:radial-gradient(ellipse at top,#244d3e,#0c1c18 72%);padding:20px}
 #offlineScreen.hidden{display:none!important}
@@ -355,7 +352,6 @@ body.immersive-camera #cameraExitBtn{display:block}
     <canvas id="cityCanvas" width="560" height="390"></canvas>
     <canvas id="city3dCanvas"></canvas>
    </div>
-   <button type="button" id="cameraExitBtn" title="بازگشت به نمای بالا">بازگشت به نمای بالا</button>
    <div class="joy-wrap">
     <div class="joy" id="joystick" aria-label="دسته حرکت"><div id="joyKnob"></div></div>
     <div class="move-hint">شهر ۲۰۰×۲۰۰ خانه است؛ در مرز شهر حرکت متوقف می‌شود. دسته زرد را بکش تا حرکت کنی.</div>
@@ -1785,7 +1781,6 @@ function openOverviewMap(){
 }
 $("openMapButton").onclick=openOverviewMap;
 $("cameraModeBtn").onclick=cycleCameraMode;
-$("cameraExitBtn").onclick=returnToTopCamera;
 updateCameraModeUI();
 window.addEventListener("resize",()=>{
  if(immersiveActive){
