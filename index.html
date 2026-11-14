@@ -1512,10 +1512,27 @@ function createLandSign(plot){
  const names={agricultural:"زمین کشاورزی",residential:"زمین مسکونی",industrial:"زمین صنعتی"};cx.fillText(names[plot.land_type]||"زمین",256,68);
  cx.font="bold 32px sans-serif";let line=plot.sold?"فروخته شد به شهردار "+(plot.sold_city||""):(plot.price?"قیمت: "+Number(plot.price).toLocaleString("fa-IR")+" تومان":"برای تعیین قیمت کلیک کن");
  cx.fillText(line.slice(0,26),256,150);
- // مساحت واقعی چندضلعی زمین از مختصات نقاط آن (فرمول کفشدوزکی)
- const landPoints=Array.isArray(plot.points)?plot.points:[];let twiceArea=0;
- for(let i=0;i<landPoints.length;i++){const a=landPoints[i],b=landPoints[(i+1)%landPoints.length];if(!Array.isArray(a)||!Array.isArray(b))continue;twiceArea+=Number(a[0])*Number(b[1])-Number(b[0])*Number(a[1]);}
- const areaM2=landPoints.length>=3?Math.round(Math.abs(twiceArea)/2):0;
+ // محاسبه مساحت چندضلعی زمین با فرمول کفشدوزکی
+ const landPoints=Array.isArray(plot.points)?plot.points:[];
+ let twiceArea=0;
+ for(let i=0;i<landPoints.length;i++){
+  const a=landPoints[i],b=landPoints[(i+1)%landPoints.length];
+  if(!Array.isArray(a)||!Array.isArray(b))continue;
+  twiceArea+=Number(a[0])*Number(b[1])-Number(b[0])*Number(a[1]);
+ }
+ let areaM2=landPoints.length>=3?Math.round(Math.abs(twiceArea)/2):0;
+ // اگر چهار ضلع یک چهارضلعی عملاً هم‌اندازه باشند و شکل نزدیک به مربع باشد،
+ // خطای جزئی زاویه/جای‌گذاری GPS نباید مساحت مربع را کمتر از طول‌ضلع × طول‌ضلع نشان دهد.
+ if(landPoints.length===4){
+  const sideLengths=landPoints.map((p,i)=>{
+   const q=landPoints[(i+1)%4];
+   return Math.hypot(Number(q[0])-Number(p[0]),Number(q[1])-Number(p[1]));
+  });
+  const avgSide=sideLengths.reduce((sum,v)=>sum+v,0)/4;
+  const sidesNearlyEqual=avgSide>0&&sideLengths.every(v=>Math.abs(v-avgSide)<=avgSide*0.03);
+  const squareArea=Math.round(avgSide*avgSide);
+  if(sidesNearlyEqual&&areaM2>=squareArea*0.90)areaM2=squareArea;
+ }
  cx.font="bold 30px sans-serif";cx.fillText("مساحت: "+areaM2.toLocaleString("fa-IR")+" متر مربع",256,240);
  const tex=new THREE.CanvasTexture(cv);tex.colorSpace=THREE.SRGBColorSpace;
  const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthTest:false}));sprite.scale.set(42,26.25,1);sprite.position.y=37.5;sprite.userData.plotId=Number(plot.id);
