@@ -133,7 +133,21 @@ body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:n
 <style id="hide-obsolete-push-controls">
 #enablePushButton, #pushStatus { display: none !important; }
 </style>
-</head>
+<style id="gps-land-market-style">
+#gpsButton{display:none;position:fixed;top:16px;right:16px;z-index:90;background:#153b2e;color:#ffe08a;border:2px solid #ffd166;border-radius:14px;padding:11px 16px;font-weight:900;font-size:16px;box-shadow:0 5px 18px #0008}
+body.immersive-camera #gpsButton.gps-visible{display:block}
+#gpsModal{position:fixed;inset:0;z-index:120;background:#0009;display:flex;align-items:center;justify-content:center;padding:16px}
+#gpsModal.hidden{display:none!important}
+#gpsWindow{width:min(420px,94vw);max-height:88vh;overflow:auto;background:#17372d;border:2px solid #d5ad4c;border-radius:18px;padding:16px;color:#f5f5ed;box-shadow:0 12px 35px #000b}
+#gpsWindow h2{margin:0 0 12px;color:#ffd166}
+#gpsWindow button{min-height:42px;border-radius:10px;font-weight:bold}
+.gps-type-grid{display:grid;grid-template-columns:1fr;gap:8px}
+.gps-type-grid button{background:#244b3b;color:#fff;border:1px solid #6f9b7d}
+#gpsPlacementActions{display:none;gap:8px;margin-top:12px}
+#gpsPlacementActions.active{display:flex}
+#gpsPlacementActions button{flex:1}
+#gpsStatus{margin-top:10px;color:#ffe3a1;line-height:1.8}
+</style></head>
 <body>
 
 
@@ -351,6 +365,25 @@ body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:n
    <div class="world" style="margin-top:10px">
     <canvas id="cityCanvas" width="560" height="390"></canvas>
     <canvas id="city3dCanvas"></canvas>
+   </div>
+   <button id="gpsButton" type="button">📍 GPS</button>
+   <div id="gpsModal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="gpsTitle">
+    <div id="gpsWindow">
+     <h2 id="gpsTitle">📍 GPS شهر</h2>
+     <div id="gpsChooseType"><p class="notice">نوع زمین موردنظر را انتخاب کن:</p>
+      <div class="gps-type-grid">
+       <button type="button" data-land-type="agricultural">🌾 کشاورزی</button>
+       <button type="button" data-land-type="residential">🏠 مسکونی</button>
+       <button type="button" data-land-type="industrial">🏭 صنعتی</button>
+      </div>
+     </div>
+     <div id="gpsPlacementActions">
+      <button type="button" id="gpsFinishButton" class="primary">تکمیل مسیر و ساخت زمین</button>
+      <button type="button" id="gpsCancelButton" class="danger">لغو</button>
+     </div>
+     <div id="gpsStatus">برای شروع، نوع زمین را انتخاب کن.</div>
+     <button type="button" id="gpsCloseButton" class="secondary full" style="margin-top:10px">بستن</button>
+    </div>
    </div>
    <div class="joy-wrap">
     <div class="joy" id="joystick" aria-label="دسته حرکت"><div id="joyKnob"></div></div>
@@ -679,7 +712,7 @@ function renderClock(){
 }
 function render(){
  if(!account)return;
- $("playerName").textContent=account.name;$("playerAge").textContent=fmt(account.age);
+ $("playerName").textContent=account.name+(isCurrentMayor?" (شهردار)":"");$("playerAge").textContent=fmt(account.age);
  $("balance").textContent=fmt(account.balance)+" تومان";$("xp").textContent=fmt(account.xp||0);
  $("level").textContent=fmt(Math.floor((account.xp||0)/100)+1);
  $("itemsCount").textContent=fmt(Object.values(account.inventory||{}).reduce((a,b)=>a+b,0))+" عدد";
@@ -703,8 +736,8 @@ function applyRealtimeMessage(data){
  }else if(data.type==="position"||data.type==="upsert"){
   const p=data.player;if(!p||p.name===account.name)return;
   const old=onlinePlayers.find(x=>x.name===p.name);
-  if(old){old.playerX=Number(p.playerX)||0;old.playerY=Number(p.playerY)||0;}
-  else onlinePlayers.push({name:p.name,playerX:Number(p.playerX)||0,playerY:Number(p.playerY)||0});
+  if(old){old.id=p.id??old.id;old.is_mayor=!!p.is_mayor;old.playerX=Number(p.playerX)||0;old.playerY=Number(p.playerY)||0;}
+  else onlinePlayers.push({id:p.id,name:p.name,is_mayor:!!p.is_mayor,playerX:Number(p.playerX)||0,playerY:Number(p.playerY)||0});
  }else if(data.type==="leave"){
   onlinePlayers=onlinePlayers.filter(p=>p.name!==data.name);
  }else if(data.type==="road_tile"){
@@ -727,6 +760,13 @@ function applyRealtimeMessage(data){
   const marker=data.marker;
   if(marker)mapMarkers=mapMarkers.filter(m=>Number(m.id)!==Number(marker.id));
   drawOverviewMap();
+ }else if(data.type==="land_plots_snapshot"){
+  landPlots=Array.isArray(data.plots)?data.plots:[];syncLandPlots3D();
+ }else if(data.type==="land_plot"||data.type==="land_plot_updated"){
+  if(data.plot)upsertLandPlot(data.plot);
+ }else if(data.type==="mayor_status"){
+  const target=onlinePlayers.find(p=>Number(p.id)===Number(data.player_id));if(target)target.is_mayor=!!data.is_mayor;
+  if(account&&(Number(account.id)===Number(data.player_id)||account.name===data.player_name)){isCurrentMayor=!!data.is_mayor;delegatedBuilderAccess=!!data.is_mayor;if(!data.is_mayor)builderToken=null;updateBuilderVisibility();render();}
  }else if(data.type==="well"){
   wellState.stock=Math.max(0,Math.min(100,Number(data.stock)||0));
   wellState.last_regen_at=Number(data.last_regen_at)||0;
@@ -821,7 +861,7 @@ function showGame(){
  $("auth").classList.add("hidden");$("game").classList.remove("hidden");
  resumeGameClock();
  document.querySelectorAll(".tab").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
- render();stopTimers();updateBuilderVisibility();refreshBuilderAccess();refreshRoads();refreshMapMarkers();drawCity();drawOverviewMap();if(raf)cancelAnimationFrame(raf);lastMove=Date.now();raf=requestAnimationFrame(movePlayer);
+ render();stopTimers();updateBuilderVisibility();refreshBuilderAccess();refreshRoads();refreshMapMarkers();refreshLandPlots();drawCity();drawOverviewMap();if(raf)cancelAnimationFrame(raf);lastMove=Date.now();raf=requestAnimationFrame(movePlayer);
  startRealtime();clockTimer=setInterval(renderClock,250);saveTimer=setInterval(()=>{save();syncState()},5000);
  if(wellTimer)clearInterval(wellTimer);refreshWell();wellTimer=setInterval(refreshWell,3000);
  setIntervalSafeSync();
@@ -853,6 +893,8 @@ function syncFacingFromYaw(){
  playerFacingY=-Math.cos(lookYaw);
 }
 let roadTiles=[],builderToken=null,builderMode=false,rotateRoadMode=false;
+let landPlots=[],landPlacementType=null,landPlacementPoints=[],landPreviewLine=null;
+let isCurrentMayor=false;
 let mapMarkers=[], mapMode="none", mapCanvas=$("mapCanvas"), mapCtx=mapCanvas.getContext("2d");
 let adminPlayersCache=[];
 const CAMERA_MODE_LABELS={top:"نمای بالا",third:"سوم‌شخص",first:"اول‌شخص"};
@@ -1019,6 +1061,9 @@ function initWorld3D(){
  }
  // بازیکن محلی
  const localPlayer=createPlayerMesh("#2874bd","#f3c6a0");
+ localPlayer.userData.nameTag=makePlayerNameSprite(account?.name||"",!!isCurrentMayor);
+ localPlayer.userData.mayor=!!isCurrentMayor;
+ localPlayer.add(localPlayer.userData.nameTag);
  scene.add(localPlayer);
  // گروه بازیکنان دیگر
  const othersGroup=new THREE.Group();scene.add(othersGroup);
@@ -1026,7 +1071,7 @@ function initWorld3D(){
  const roadsGroup=new THREE.Group();scene.add(roadsGroup);
  world3d={
   scene,camera,renderer,localPlayer,othersGroup,roadsGroup,wellG,
-  otherMeshes:new Map(),roadMeshes:new Map(),
+  otherMeshes:new Map(),roadMeshes:new Map(),landMeshes:new Map(),landGroup:null,
   raycaster:new THREE.Raycaster(),
   pointer:new THREE.Vector2(),
   ready:true
@@ -1082,6 +1127,12 @@ function syncRoads3D(){
   if(!seen.has(key)){world3d.roadsGroup.remove(mesh);world3d.roadMeshes.delete(key);}
  }
 }
+function makePlayerNameSprite(name,isMayor){
+ const cv=document.createElement("canvas");cv.width=512;cv.height=96;const c=cv.getContext("2d");
+ c.font="bold 38px sans-serif";c.textAlign="center";c.fillStyle="#10251f";c.fillRect(5,5,502,86);c.strokeStyle="#ffd166";c.lineWidth=5;c.strokeRect(5,5,502,86);
+ c.fillStyle="#ffffff";c.fillText(String(name)+(isMayor?" (شهردار)":""),256,62,480);
+ const tex=new THREE.CanvasTexture(cv);tex.colorSpace=THREE.SRGBColorSpace;const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthTest:false}));s.scale.set(62,12,1);s.position.y=52;return s;
+}
 function syncOthers3D(){
  if(!world3d)return;
  const seen=new Set();
@@ -1091,8 +1142,12 @@ function syncOthers3D(){
   let m=world3d.otherMeshes.get(p.name);
   if(!m){
    m=createPlayerMesh("#d64b55","#f3c6a0");
+   m.userData.nameTag=makePlayerNameSprite(p.name,!!p.is_mayor);m.add(m.userData.nameTag);m.userData.mayor=!!p.is_mayor;
    world3d.othersGroup.add(m);
    world3d.otherMeshes.set(p.name,m);
+  }else if(m.userData.mayor!==!!p.is_mayor){
+   if(m.userData.nameTag)m.remove(m.userData.nameTag);
+   m.userData.nameTag=makePlayerNameSprite(p.name,!!p.is_mayor);m.add(m.userData.nameTag);m.userData.mayor=!!p.is_mayor;
   }
   m.position.set(Number(p.playerX)||0,0,Number(p.playerY)||0);
  });
@@ -1102,6 +1157,12 @@ function syncOthers3D(){
 }
 function updateCamera3D(){
  if(!world3d||!account)return;
+ if(world3d.localPlayer.userData.mayor!==!!isCurrentMayor||world3d.localPlayer.userData.playerName!==account.name){
+  if(world3d.localPlayer.userData.nameTag)world3d.localPlayer.remove(world3d.localPlayer.userData.nameTag);
+  world3d.localPlayer.userData.nameTag=makePlayerNameSprite(account.name,!!isCurrentMayor);
+  world3d.localPlayer.add(world3d.localPlayer.userData.nameTag);
+  world3d.localPlayer.userData.mayor=!!isCurrentMayor;world3d.localPlayer.userData.playerName=account.name;
+ }
  syncFacingFromYaw();
  const px=Number(account.playerX)||0,pz=Number(account.playerY)||0;
  const fx=playerFacingX,fz=playerFacingY;
@@ -1138,6 +1199,7 @@ function render3D(){
  if(!world3d||!account)return;
  syncRoads3D();
  syncOthers3D();
+ syncLandPlots3D();
  updateCamera3D();
  world3d.renderer.render(world3d.scene,world3d.camera);
 }
@@ -1169,7 +1231,7 @@ function enterImmersiveCamera(){
  }else{
   console.warn("Three.js بارگذاری نشد؛ حالت ۲بعدی حفظ می‌شود.");
  }
- drawCity();
+ drawCity();updateGpsVisibility();
 }
 function exitImmersiveCamera(){
  if(!immersiveActive)return;
@@ -1183,22 +1245,22 @@ function exitImmersiveCamera(){
   }
  }catch(e){}
  resizeCityCanvasForMode();
- drawCity();
+ drawCity();updateGpsVisibility();
 }
 function cycleCameraMode(){
  if(cameraMode==="top"){
   cameraMode="third";
   updateCameraModeUI();
-  enterImmersiveCamera();
+  enterImmersiveCamera();updateGpsVisibility();
  }else if(cameraMode==="third"){
   cameraMode="first";
   updateCameraModeUI();
   if(!immersiveActive)enterImmersiveCamera();
-  else{resize3D();drawCity();}
+  else{resize3D();drawCity();}updateGpsVisibility();
  }else{
   cameraMode="top";
   updateCameraModeUI();
-  exitImmersiveCamera();
+  exitImmersiveCamera();updateGpsVisibility();
  }
 }
 function returnToTopCamera(){
@@ -1259,8 +1321,8 @@ function isSupportBuilderAccount(){const n=normalizedAccountName();return !!acco
 function canUseRoadBuilder(){return isCreatorAccount()||isSupportBuilderAccount()||delegatedBuilderAccess;}
 async function refreshBuilderAccess(){
  if(!account||!authToken){delegatedBuilderAccess=false;updateBuilderVisibility();return;}
- try{const d=await api('/builder/status');delegatedBuilderAccess=!!d.allowed;}catch(e){delegatedBuilderAccess=false;}
- updateBuilderVisibility();
+ try{const d=await api('/builder/status');delegatedBuilderAccess=!!d.allowed;isCurrentMayor=!!d.is_mayor;}catch(e){delegatedBuilderAccess=false;isCurrentMayor=false;}
+ updateBuilderVisibility();render();updateGpsVisibility();
 }
 function updateBuilderVisibility(){
  const controls=$("builderControls");
@@ -1271,6 +1333,106 @@ function updateBuilderVisibility(){
  $("updateManagementSection").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  $("mapAddMarkerButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  if(!allowed){$("mapAddMarkerButton").classList.add("hidden");builderToken=null;builderMode=false;rotateRoadMode=false;$("asphaltToolButton").classList.add("hidden");$("rotateRoadButton").classList.add("hidden");$("adminPlayersPanel").classList.add("hidden");$("adminPlayersButton").disabled=true;}
+}
+function updateGpsVisibility(){
+ const b=$("gpsButton");if(!b)return;
+ const show=!!account&&isCreatorAccount()&&cameraMode==="third"&&immersiveActive;
+ b.classList.toggle("gps-visible",show);
+}
+function openGpsMenu(){if(!isCreatorAccount()||cameraMode!=="third")return;$("gpsModal").classList.remove("hidden");$("gpsChooseType").style.display="block";$("gpsPlacementActions").classList.remove("active");$("gpsStatus").textContent="نوع زمین را انتخاب کن.";}
+function closeGpsMenu(){if(landPlacementType)cancelLandPlacement();$("gpsModal").classList.add("hidden");}
+function cancelLandPlacement(){
+ landPlacementType=null;landPlacementPoints=[];
+ if(world3d&&landPreviewLine){world3d.scene.remove(landPreviewLine);landPreviewLine.geometry.dispose();landPreviewLine.material.dispose();landPreviewLine=null;}
+ $("gpsPlacementActions").classList.remove("active");$("gpsChooseType").style.display="block";$("gpsStatus").textContent="عملیات ساخت لغو شد.";
+}
+function startLandPlacement(type){
+ if(!isCreatorAccount()||!builderToken){$("gpsStatus").textContent="ابتدا رمز ساخت را فعال کن.";return;}
+ landPlacementType=type;landPlacementPoints=[];
+ $("gpsChooseType").style.display="none";$("gpsPlacementActions").classList.add("active");
+ $("gpsStatus").textContent="روی زمین شهر ضربه بزن و حداقل سه نقطه مشخص کن؛ خط قرمز نقاط را به هم وصل می‌کند.";
+}
+async function finishLandPlacement(){
+ if(!isCreatorAccount()||!builderToken||!landPlacementType||landPlacementPoints.length<3){$("gpsStatus").textContent="حداقل سه نقطه برای ساخت زمین لازم است.";return;}
+ if(landPreviewLine){world3d.scene.remove(landPreviewLine);landPreviewLine.geometry.dispose();landPreviewLine.material.dispose();}
+ const closedPts=landPlacementPoints.map(v=>new THREE.Vector3(v[0],2,v[1]));closedPts.push(closedPts[0].clone());
+ landPreviewLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints(closedPts),new THREE.LineBasicMaterial({color:0xff2020}));world3d.scene.add(landPreviewLine);
+ try{const d=await roadAction("/land-plots",{land_type:landPlacementType,points:landPlacementPoints});if(d.plot)upsertLandPlot(d.plot);cancelLandPlacement();$("gpsStatus").textContent="زمین ساخته شد و برای همه بازیکنان این سرور نمایش داده می‌شود.";await refreshLandPlots();}
+ catch(e){$("gpsStatus").textContent=e.message||"ساخت زمین انجام نشد.";}
+}
+function addLandPlacementPoint(point){
+ if(!landPlacementType||!world3d)return;
+ landPlacementPoints.push([Number(point.x.toFixed(2)),Number(point.z.toFixed(2))]);
+ if(landPreviewLine){world3d.scene.remove(landPreviewLine);landPreviewLine.geometry.dispose();landPreviewLine.material.dispose();}
+ const pts=landPlacementPoints.map(v=>new THREE.Vector3(v[0],2,v[1]));
+ if(pts.length>1){landPreviewLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0xff2020}));world3d.scene.add(landPreviewLine);}
+ $("gpsStatus").textContent="نقاط ثبت‌شده: "+landPlacementPoints.length+" · حداقل سه نقطه لازم است.";
+}
+function upsertLandPlot(plot){
+ const i=landPlots.findIndex(p=>Number(p.id)===Number(plot.id));if(i>=0)landPlots[i]=plot;else landPlots.push(plot);syncLandPlots3D();
+}
+async function refreshLandPlots(){
+ if(!account||!authToken)return;try{const d=await api("/land-plots");landPlots=Array.isArray(d.plots)?d.plots:[];syncLandPlots3D();}catch(e){}
+}
+function landPlotColor(type){return type==="agricultural"?0x9b7846:(type==="industrial"?0x777b80:0xb08a58);}
+function makeLandTexture(type){
+ const c=document.createElement("canvas");c.width=256;c.height=256;const x=c.getContext("2d");
+ x.fillStyle=type==="agricultural"?"#927044":(type==="industrial"?"#777b80":"#a9875b");x.fillRect(0,0,256,256);
+ if(type==="agricultural"){x.strokeStyle="#6e512e";x.lineWidth=5;for(let y=12;y<256;y+=24){x.beginPath();x.moveTo(0,y);x.lineTo(256,y+10);x.stroke();}}
+ for(let i=0;i<420;i++){const px=(i*73)%256,py=(i*137)%256;x.fillStyle=type==="industrial"?(i%2?"#686d72":"#92979b"):(i%2?"#765c3b":"#c1a078");x.fillRect(px,py,2+(i%3),2+(i%2));}
+ const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(2,2);t.colorSpace=THREE.SRGBColorSpace;return t;
+}
+function createLandSign(plot){
+ const group=new THREE.Group();const post=new THREE.Mesh(new THREE.BoxGeometry(3,22,3),new THREE.MeshStandardMaterial({color:0x704523}));post.position.y=11;group.add(post);
+ const cv=document.createElement("canvas");cv.width=512;cv.height=256;const cx=cv.getContext("2d");
+ cx.fillStyle="#17372d";cx.fillRect(0,0,512,256);cx.strokeStyle="#ffd166";cx.lineWidth=12;cx.strokeRect(7,7,498,242);
+ cx.fillStyle="#fff2c4";cx.textAlign="center";cx.font="bold 42px sans-serif";
+ const names={agricultural:"زمین کشاورزی",residential:"زمین مسکونی",industrial:"زمین صنعتی"};cx.fillText(names[plot.land_type]||"زمین",256,68);
+ cx.font="bold 32px sans-serif";let line=plot.sold?"فروخته شد به شهردار "+(plot.sold_city||""):(plot.price?"قیمت: "+Number(plot.price).toLocaleString("fa-IR")+" تومان":"برای تعیین قیمت کلیک کن");
+ cx.fillText(line.slice(0,26),256,150);
+ const tex=new THREE.CanvasTexture(cv);tex.colorSpace=THREE.SRGBColorSpace;
+ const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthTest:false}));sprite.scale.set(42,21,1);sprite.position.y=35;sprite.userData.plotId=Number(plot.id);
+ group.add(sprite);group.userData.plotId=Number(plot.id);group.position.set(plot.center_x,0,plot.center_y);return group;
+}
+function syncLandPlots3D(){
+ if(!world3d)return;
+ const signature=JSON.stringify(landPlots||[]);
+ if(world3d.landPlotsSignature===signature)return;
+ if(!world3d.landGroup){world3d.landGroup=new THREE.Group();world3d.scene.add(world3d.landGroup);world3d.landMeshes=new Map();}
+ world3d.landGroup.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){const mats=Array.isArray(o.material)?o.material:[o.material];mats.forEach(m=>{if(m.map)m.map.dispose();m.dispose();});}});
+ world3d.landGroup.clear();world3d.landMeshes.clear();world3d.landPlotsSignature=signature;
+ (landPlots||[]).forEach(plot=>{
+  const id=String(plot.id);
+  const pts=(plot.points||[]).map(p=>new THREE.Vector2(Number(p[0])-Number(plot.center_x),Number(p[1])-Number(plot.center_y)));if(pts.length<3)return;
+  const shape=new THREE.Shape(pts),geo=new THREE.ShapeGeometry(shape);
+  const mat=new THREE.MeshStandardMaterial({map:makeLandTexture(plot.land_type),color:0xffffff,roughness:.98,side:THREE.DoubleSide});
+  const mesh=new THREE.Mesh(geo,mat);mesh.rotation.x=-Math.PI/2;mesh.position.y=1;mesh.receiveShadow=true;
+  const g=new THREE.Group();g.add(mesh);g.add(createLandSign(plot));world3d.landGroup.add(g);world3d.landMeshes.set(id,g);
+ });
+}
+function getGroundPoint(clientX,clientY){
+ if(!world3d)return null;const c3=$("city3dCanvas"),r=c3.getBoundingClientRect();
+ world3d.pointer.set(((clientX-r.left)/r.width)*2-1,-((clientY-r.top)/r.height)*2+1);world3d.raycaster.setFromCamera(world3d.pointer,world3d.camera);
+ const plane=new THREE.Plane(new THREE.Vector3(0,1,0),0),target=new THREE.Vector3();return world3d.raycaster.ray.intersectPlane(plane,target)?target:null;
+}
+function hitLandSign(clientX,clientY){
+ if(!world3d||!world3d.landGroup)return null;const c3=$("city3dCanvas"),r=c3.getBoundingClientRect();
+ world3d.pointer.set(((clientX-r.left)/r.width)*2-1,-((clientY-r.top)/r.height)*2+1);world3d.raycaster.setFromCamera(world3d.pointer,world3d.camera);
+ const hits=world3d.raycaster.intersectObject(world3d.landGroup,true);
+ for(const hit of hits){let o=hit.object;while(o&&o!==world3d.landGroup){if(o.userData&&o.userData.plotId)return Number(o.userData.plotId);o=o.parent;}}return null;
+}
+async function interactLandPlot(plotId){
+ const plot=landPlots.find(p=>Number(p.id)===Number(plotId));if(!plot)return;
+ if(isCreatorAccount()&&builderToken&&!plot.sold){
+  const raw=prompt("قیمت زمین به تومان را وارد کن:");if(raw===null)return;
+  const price=Number(String(raw).replace(/[٬,\s]/g,""));if(!Number.isSafeInteger(price)||price<1){alert("قیمت معتبر نیست.");return;}
+  try{const d=await roadAction("/land-plots/price",{plot_id:plotId,price});upsertLandPlot(d.plot);alert("قیمت زمین ثبت شد.");}catch(e){alert(e.message);}return;
+ }
+ if(isCurrentMayor&&!plot.sold&&plot.price){
+  if(!confirm("خرید این زمین به قیمت "+Number(plot.price).toLocaleString("fa-IR")+" تومان؟"))return;
+  try{const d=await api("/land-plots/buy",{plot_id:plotId});if(d.plot)upsertLandPlot(d.plot);if(d.balance!==undefined){account.balance=d.balance;render();save();}alert("زمین با موفقیت خریداری شد.");}catch(e){alert(e.message);}return;
+ }
+ alert(plot.sold?"این زمین فروخته شده است.":(plot.price?"فقط شهردار همین شهر می‌تواند این زمین را بخرد.":"هنوز قیمت این زمین تعیین نشده است."));
 }
 async function refreshRoads(){
  if(!account||!authToken)return;
@@ -1537,6 +1699,17 @@ function drawCity(){
   ctx.stroke();ctx.restore();
  });
 
+ // زمین‌های کاربری ساخته‌شده؛ در نمای دوبعدی نیز برای همه بازیکنان دیده می‌شوند.
+ (landPlots||[]).forEach(plot=>{
+  const pts=plot.points||[];if(pts.length<3)return;
+  ctx.beginPath();pts.forEach((p,i)=>{const x=Number(p[0])-left,y=Number(p[1])-top;if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);});ctx.closePath();
+  ctx.fillStyle=plot.land_type==="agricultural"?"#9b7846":(plot.land_type==="industrial"?"#777b80":"#b08a58");
+  ctx.globalAlpha=.88;ctx.fill();ctx.globalAlpha=1;ctx.strokeStyle="#d8b46a";ctx.lineWidth=2;ctx.stroke();
+  const cx=Number(plot.center_x)-left,cy=Number(plot.center_y)-top;
+  ctx.fillStyle="#fff3d0";ctx.font="bold 12px sans-serif";ctx.textAlign="center";
+  const label=plot.sold?"فروخته شد":(plot.price?fmt(plot.price)+" تومان":"زمین");
+  ctx.fillText(label,cx,cy);
+ });
  // چهار مسیر آسفالتی هم‌اندازه؛ هر چهار جهت تا انتهای نقشه ادامه دارند.
  const roadY=-145-top;
  const roadX=0-left;
@@ -1927,6 +2100,8 @@ if(c3el){
   if(!immersiveActive||!account)return;
   c3el.setPointerCapture(e.pointerId);
   touchLookMoved=false;
+  if(landPlacementType){const point=getGroundPoint(e.clientX,e.clientY);if(point)addLandPlacementPoint(point);touchLookActive=false;return;}
+  const clickedPlot=hitLandSign(e.clientX,e.clientY);if(clickedPlot){interactLandPlot(clickedPlot);touchLookActive=false;return;}
   // اگر دقیقاً روی مدل چاه کلیک شد → باز کردن چاه
   if(hitWell3D(e.clientX,e.clientY)){
    tryOpenWellFrom3D();
@@ -1948,6 +2123,7 @@ if(c3el){
   syncFacingFromYaw();
  });
  c3el.addEventListener("pointerup",e=>{
+  if(landPlacementType){touchLookActive=false;touchLookMoved=false;return;}
   // اگر حرکت کم بود و روی چاه رها شد، دوباره امتحان کن
   if(immersiveActive&&!touchLookMoved&&hitWell3D(e.clientX,e.clientY)){
    tryOpenWellFrom3D();
@@ -1977,6 +2153,18 @@ function isReservedPlayerName(value){
  const normalized=normalizeNameForFilter(value);
  return RESERVED_NAME_TERMS.some(term=>normalized.includes(normalizeNameForFilter(term)));
 }
+$("gpsButton").onclick=openGpsMenu;
+$("gpsCloseButton").onclick=closeGpsMenu;
+$("gpsCancelButton").onclick=cancelLandPlacement;
+$("gpsFinishButton").onclick=finishLandPlacement;
+document.querySelectorAll("[data-land-type]").forEach(b=>b.addEventListener("click",()=>startLandPlacement(b.dataset.landType)));
+canvas.addEventListener("click",e=>{
+ if(immersiveActive||!account||!landPlots.length)return;
+ const rect=canvas.getBoundingClientRect(),sx=(e.clientX-rect.left)*(canvas.width/rect.width),sy=(e.clientY-rect.top)*(canvas.height/rect.height);
+ const wx=sx-canvas.width/2+(Number(account.cameraX)||0),wy=sy-canvas.height/2+(Number(account.cameraY)||0);
+ const inside=(poly,x,y)=>{let c=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const xi=Number(poly[i][0]),yi=Number(poly[i][1]),xj=Number(poly[j][0]),yj=Number(poly[j][1]);if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi+1e-9)+xi))c=!c;}return c;};
+ const plot=landPlots.find(p=>inside(p.points||[],wx,wy));if(plot)interactLandPlot(plot.id);
+});
 $("registerBtn").onclick=async()=>{
  const name=$("regName").value.trim(),age=Number($("regAge").value),pass=$("regPass").value;
  $("regMsg").textContent="";
