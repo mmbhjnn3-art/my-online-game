@@ -1411,10 +1411,37 @@ async function finishLandPlacement(){
  try{const d=await roadAction("/land-plots",{land_type:landPlacementType,points:landPlacementPoints});if(d.plot)upsertLandPlot(d.plot);cancelLandPlacement();$("gpsStatus").textContent="زمین ساخته شد و برای همه بازیکنان این سرور نمایش داده می‌شود.";await refreshLandPlots();}
  catch(e){$("gpsStatus").textContent=e.message||"ساخت زمین انجام نشد.";}
 }
+function landDraftMeasure(a,b,index){
+ const dx=b[0]-a[0],dz=b[1]-a[1],distance=Math.hypot(dx,dz);
+ let fx=0,fz=-1;
+ if(index>=2){
+  const prev=landPlacementPoints[index-1],before=landPlacementPoints[index-2];
+  const hx=prev[0]-before[0],hz=prev[1]-before[1],hl=Math.hypot(hx,hz);
+  if(hl>0.001){fx=hx/hl;fz=hz/hl;}
+ }else if(world3d&&world3d.camera){
+  const dir=new THREE.Vector3();world3d.camera.getWorldDirection(dir);
+  const len=Math.hypot(dir.x,dir.z);if(len>0.001){fx=dir.x/len;fz=dir.z/len;}
+ }
+ // در دستگاه مختصات سه‌بعدی، بردار راست نسبت به جهت حرکت برابر (-fz, fx) است.
+ const rightX=-fz,rightZ=fx;
+ const lateral=dx*rightX+dz*rightZ;
+ return {distance,lateral};
+}
+function makeLandMeasureSprite(text){
+ const cv=document.createElement("canvas");cv.width=512;cv.height=128;
+ const ctx=cv.getContext("2d");
+ ctx.fillStyle="rgba(15,35,29,.94)";ctx.beginPath();ctx.roundRect(5,5,502,118,22);ctx.fill();
+ ctx.strokeStyle="#ffd166";ctx.lineWidth=6;ctx.stroke();
+ ctx.fillStyle="#fff4d0";ctx.font="bold 42px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
+ ctx.fillText(text,256,65,470);
+ const texture=new THREE.CanvasTexture(cv);texture.colorSpace=THREE.SRGBColorSpace;
+ const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,transparent:true,depthTest:false,depthWrite:false}));
+ sprite.scale.set(34,8.5,1);sprite.renderOrder=999;return sprite;
+}
 function redrawLandDraft(){
  if(!world3d)return;
  if(landPreviewLine){world3d.scene.remove(landPreviewLine);landPreviewLine.geometry.dispose();landPreviewLine.material.dispose();landPreviewLine=null;}
- if(landPointGroup){world3d.scene.remove(landPointGroup);landPointGroup.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();});landPointGroup=null;}
+ if(landPointGroup){world3d.scene.remove(landPointGroup);landPointGroup.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){if(o.material.map)o.material.map.dispose();o.material.dispose();}});landPointGroup=null;}
  landPointGroup=new THREE.Group();
  const pts=landPlacementPoints.map(v=>new THREE.Vector3(v[0],2.8,v[1]));
  if(pts.length>1){landPreviewLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0xff2020,linewidth:3}));world3d.scene.add(landPreviewLine);}
@@ -1422,7 +1449,19 @@ function redrawLandDraft(){
   const last=i===landPlacementPoints.length-1;
   const marker=new THREE.Mesh(new THREE.SphereGeometry(last?5.2:4.2,16,12),new THREE.MeshBasicMaterial({color:last?0xffd166:0xff3030,depthTest:false}));
   marker.position.set(v[0],4.2,v[1]);marker.userData.draftPointIndex=i;landPointGroup.add(marker);
+  if(i>0){
+   const a=landPlacementPoints[i-1],m=landDraftMeasure(a,v,i);
+   const label=makeLandMeasureSprite("طول "+m.distance.toFixed(1)+" متر  |  "+(m.lateral>0.05?"راست +":(m.lateral< -0.05?"چپ ":"مستقیم "))+(Math.abs(m.lateral)<0.05?"0.0":Math.abs(m.lateral).toFixed(1))+" متر");
+   label.position.set((a[0]+v[0])/2,13,(a[1]+v[1])/2);landPointGroup.add(label);
+  }
  });
+ if(landPlacementPoints.length){
+  const lastIndex=landPlacementPoints.length-1;
+  if(lastIndex>0){
+   const a=landPlacementPoints[lastIndex-1],b=landPlacementPoints[lastIndex],m=landDraftMeasure(a,b,lastIndex);
+   $("gpsStatus").textContent="نقاط: "+landPlacementPoints.length+" · طول خط: "+m.distance.toFixed(1)+" متر · انحراف: "+(m.lateral>0.05?"مثبت "+m.lateral.toFixed(1)+" متر به راست":(m.lateral< -0.05?m.lateral.toFixed(1)+" متر به چپ":"۰ متر / مستقیم"))+" · نقطه زرد آخر را جابه‌جا کن.";
+  }
+ }
  world3d.scene.add(landPointGroup);
 }
 function hitLastDraftPoint(clientX,clientY){
