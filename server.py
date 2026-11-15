@@ -151,7 +151,6 @@ def init_db():
                 last_regen_at BIGINT NOT NULL
             )
         """)
-        db.execute("ALTER TABLE server_wells ADD COLUMN IF NOT EXISTS size DOUBLE PRECISION NOT NULL DEFAULT 1")
         db.execute("""
             CREATE TABLE IF NOT EXISTS builder_sessions (
                 token TEXT PRIMARY KEY,
@@ -420,7 +419,7 @@ def get_or_create_well(db, server_id, lock=True):
     )
     suffix = " FOR UPDATE" if lock else ""
     row = db.execute(
-        "SELECT server_id, stock, last_regen_at, size FROM server_wells WHERE server_id=?" + suffix,
+        "SELECT server_id, stock, last_regen_at FROM server_wells WHERE server_id=?" + suffix,
         (server_id,)
     ).fetchone()
     stock = max(0, min(100, int(row["stock"])))
@@ -443,15 +442,14 @@ def get_or_create_well(db, server_id, lock=True):
                 "UPDATE server_wells SET stock=?, last_regen_at=? WHERE server_id=?",
                 (stock, last_regen_at, server_id)
             )
-    return {"server_id": server_id, "stock": stock, "last_regen_at": last_regen_at, "size": max(0.5, min(3.0, float(row.get("size", 1) or 1)))}
+    return {"server_id": server_id, "stock": stock, "last_regen_at": last_regen_at}
 
 
 async def broadcast_well(server_id, well):
     await ws_send_group(server_id, {
         "type": "well",
         "stock": well["stock"],
-        "last_regen_at": well["last_regen_at"],
-        "size": well.get("size", 1)
+        "last_regen_at": well["last_regen_at"]
     })
 
 
@@ -478,10 +476,6 @@ class ShopBuyIn(BaseModel):
 
 class BuilderUnlockIn(BaseModel):
     password: str = Field(default="", max_length=128)
-
-
-class WellResizeIn(BaseModel):
-    size: float = Field(ge=0.5, le=3.0)
 
 
 class RoadBuilderGrantIn(BaseModel):
@@ -1034,23 +1028,6 @@ async def buy_well_water(authorization: str | None = Header(default=None)):
 
     await broadcast_well(server_id, well)
     return {"ok": True, "state": state, "well": well}
-
-
-@app.post("/api/well/resize")
-async def resize_well(
-    data: WellResizeIn,
-    authorization: str | None = Header(default=None),
-    x_builder_token: str | None = Header(default=None)
-):
-    """Only the creator with a valid builder session can resize the shared well."""
-    with connect() as db:
-        creator = require_builder(db, authorization, x_builder_token)
-        server_id = str(creator["session_server"])
-        get_or_create_well(db, server_id, lock=False)
-        db.execute("UPDATE server_wells SET size=? WHERE server_id=?", (data.size, server_id))
-        well = get_or_create_well(db, server_id, lock=False)
-    await broadcast_well(server_id, well)
-    return {"ok": True, "well": well}
 
 
 @app.get("/api/players")
