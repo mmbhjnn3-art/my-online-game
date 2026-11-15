@@ -1370,14 +1370,30 @@ function makeRoadVisual(type="asphalt",orientation=0){
  switch(type){
   case "right_turn":addArc(24,-24,24,Math.PI,Math.PI/2,16,12);dashCurve(24,-24,24,Math.PI,Math.PI/2,12);break;
   case "left_turn":addArc(-24,-24,24,0,Math.PI/2,16,12);dashCurve(-24,-24,24,0,Math.PI/2,12);break;
-  case "three_way":addBox(16,48);addBox(24,16,12,0,Math.PI/2);dashAxis("z",-23,23);dashAxis("x",2,23);break;
-  case "four_way":addBox(16,48);addBox(16,48,0,0,Math.PI/2);dashAxis("z",-23,23);dashAxis("x",-23,23);break;
-  case "u_turn":addArc(0,0,17,Math.PI,0,16,16);dashCurve(0,0,17,Math.PI,0,16);break;
+  case "three_way":
+   // ساقه اصلی از لبه پایین تا لبه بالا؛ شاخه افقی دقیقاً از مرکز تا لبه راست می‌رسد.
+   addBox(16,48);
+   addBox(16,24,12,0,Math.PI/2);
+   dashAxis("z",-23,23);dashAxis("x",2,23);
+   break;
+  case "four_way":
+   addBox(16,48);addBox(16,48,0,0,Math.PI/2);
+   dashAxis("z",-23,23);dashAxis("x",-23,23);
+   break;
+  case "u_turn":
+   // دو دهانه تا لبه خانه ادامه دارند و به نیم‌دایره متصل می‌شوند.
+   addArc(0,0,17,Math.PI,0,16,24);
+   addBox(16,8,-20,0,Math.PI/2);addBox(16,8,20,0,Math.PI/2);
+   dashCurve(0,0,17,Math.PI,0,24);
+   dashAxis("x",-23,-17);dashAxis("x",17,23);
+   break;
   case "roundabout":{
-   const ring=new THREE.Mesh(new THREE.TorusGeometry(13,8,8,36),mat);ring.rotation.x=Math.PI/2;ring.position.y=.06;ring.receiveShadow=true;ring.castShadow=true;g.add(ring);
+   // حلقه آسفالت با چهار ورودی هم‌عرض؛ خط‌کشی خط‌چین روی خود میدان و ورودی‌ها.
+   const ring=new THREE.Mesh(new THREE.TorusGeometry(13,8,8,64),mat);ring.rotation.x=Math.PI/2;ring.position.y=.06;ring.receiveShadow=true;ring.castShadow=true;g.add(ring);
    addBox(16,13,0,-17);addBox(16,13,0,17);addBox(16,13,-17,0,Math.PI/2);addBox(16,13,17,0,Math.PI/2);
-   const lane=new THREE.Mesh(new THREE.TorusGeometry(13,.65,5,48),dashMat);lane.rotation.x=Math.PI/2;lane.position.y=.15;g.add(lane);
-   dashAxis("z",-23,-17);dashAxis("z",17,23);dashAxis("x",-23,-17);dashAxis("x",17,23);break;
+   dashCurve(0,0,13,0,Math.PI*2,40);
+   dashAxis("z",-23,-17);dashAxis("z",17,23);dashAxis("x",-23,-17);dashAxis("x",17,23);
+   break;
   }
   case "asphalt":default:
    // تمام قطعات در یک خانه ۴۸×۴۸ قرار می‌گیرند و عرض مسیر در همه مدل‌ها ۱۶ واحد است.
