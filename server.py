@@ -230,6 +230,7 @@ def init_db():
             )
         """)
         db.execute("CREATE INDEX IF NOT EXISTS idx_land_plots_server ON land_plots(server_id, id)")
+        db.execute("ALTER TABLE land_plots ADD COLUMN IF NOT EXISTS post_height DOUBLE PRECISION NOT NULL DEFAULT 0")
         db.execute("ALTER TABLE road_tiles ADD COLUMN IF NOT EXISTS orientation SMALLINT NOT NULL DEFAULT 0")
         db.execute("""
             CREATE TABLE IF NOT EXISTS game_announcement (
@@ -571,6 +572,11 @@ class LandPlotUpdateIn(BaseModel):
     plot_id: int = Field(ge=1)
     land_type: str = Field(pattern="^(agricultural|residential|industrial)$")
     price: int | None = Field(default=None, ge=1, le=10_000_000_000)
+
+
+class LandPlotPostHeightIn(BaseModel):
+    plot_id: int = Field(ge=1)
+    post_height: float = Field(ge=1, le=50)
 
 
 class LandPlotDeleteIn(BaseModel):
@@ -1461,6 +1467,7 @@ def serialize_land_plot(row):
         "land_type": row["land_type"], "points": json.loads(row["points_json"]),
         "center_x": float(row["center_x"]), "center_y": float(row["center_y"]),
         "price": int(row["price"]) if row["price"] is not None else None,
+        "post_height": float(row["post_height"] or 0),
         "sold": row["sold_to"] is not None, "sold_city": row["sold_city"],
         "created_at": int(row["created_at"])
     }
@@ -1558,6 +1565,33 @@ async def update_land_plot(
         db.execute(
             "UPDATE land_plots SET land_type=?, price=?, updated_at=? WHERE id=?",
             (data.land_type, data.price, int(time.time()), data.plot_id)
+        )
+        updated = db.execute(
+            "SELECT * FROM land_plots WHERE id=? AND server_id=?",
+            (data.plot_id, player["session_server"])
+        ).fetchone()
+        plot = serialize_land_plot(updated)
+    await ws_send_group(player["session_server"], {"type": "land_plot_updated", "plot": plot})
+    return {"ok": True, "plot": plot}
+
+
+@app.post("/api/land-plots/post-height")
+async def update_land_plot_post_height(
+    data: LandPlotPostHeightIn,
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None)
+):
+    with connect() as db:
+        player = require_builder(db, authorization, x_builder_token)
+        row = db.execute(
+            "SELECT id, sold_to FROM land_plots WHERE id=? AND server_id=? FOR UPDATE",
+            (data.plot_id, player["session_server"])
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "زمین پیدا نشد.")
+        db.execute(
+            "UPDATE land_plots SET post_height=?, updated_at=? WHERE id=? AND server_id=?",
+            (float(data.post_height), int(time.time()), data.plot_id, player["session_server"])
         )
         updated = db.execute(
             "SELECT * FROM land_plots WHERE id=? AND server_id=?",
