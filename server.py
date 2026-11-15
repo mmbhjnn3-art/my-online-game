@@ -149,10 +149,12 @@ def init_db():
                 server_id TEXT PRIMARY KEY,
                 stock INTEGER NOT NULL DEFAULT 100,
                 capacity INTEGER NOT NULL DEFAULT 100,
+                scale DOUBLE PRECISION NOT NULL DEFAULT 0.05,
                 last_regen_at BIGINT NOT NULL
             )
         """)
         db.execute("ALTER TABLE server_wells ADD COLUMN IF NOT EXISTS capacity INTEGER NOT NULL DEFAULT 100")
+        db.execute("ALTER TABLE server_wells ADD COLUMN IF NOT EXISTS scale DOUBLE PRECISION NOT NULL DEFAULT 0.05")
         db.execute("""
             CREATE TABLE IF NOT EXISTS builder_sessions (
                 token TEXT PRIMARY KEY,
@@ -415,16 +417,17 @@ def get_or_create_well(db, server_id, lock=True):
     """Return the shared, configurable well for the selected game server."""
     now = int(time.time())
     db.execute(
-        """INSERT INTO server_wells(server_id, stock, capacity, last_regen_at)
-        VALUES(?, 100, 100, ?) ON CONFLICT(server_id) DO NOTHING""",
+        """INSERT INTO server_wells(server_id, stock, capacity, scale, last_regen_at)
+        VALUES(?, 100, 100, 0.05, ?) ON CONFLICT(server_id) DO NOTHING""",
         (server_id, now)
     )
     suffix = " FOR UPDATE" if lock else ""
     row = db.execute(
-        "SELECT server_id, stock, capacity, last_regen_at FROM server_wells WHERE server_id=?" + suffix,
+        "SELECT server_id, stock, capacity, scale, last_regen_at FROM server_wells WHERE server_id=?" + suffix,
         (server_id,)
     ).fetchone()
-    capacity = max(1, int(row.get("capacity", 100)))
+    capacity = max(1, int(row["capacity"]))
+    scale = max(0.03, min(0.30, float(row["scale"])))
     stock = max(0, min(capacity, int(row["stock"])))
     last_regen_at = int(row["last_regen_at"])
     if stock >= capacity:
@@ -445,13 +448,14 @@ def get_or_create_well(db, server_id, lock=True):
                 "UPDATE server_wells SET stock=?, last_regen_at=? WHERE server_id=?",
                 (stock, last_regen_at, server_id)
             )
-    return {"server_id": server_id, "stock": stock, "capacity": capacity, "last_regen_at": last_regen_at}
+    return {"server_id": server_id, "stock": stock, "capacity": capacity, "scale": scale, "last_regen_at": last_regen_at}
 
 async def broadcast_well(server_id, well):
     await ws_send_group(server_id, {
         "type": "well",
         "stock": well["stock"],
         "capacity": well.get("capacity", 100),
+        "scale": well.get("scale", 0.05),
         "last_regen_at": well["last_regen_at"]
     })
 
@@ -483,6 +487,9 @@ class BuilderUnlockIn(BaseModel):
 
 class WellResizeIn(BaseModel):
     capacity: int = Field(ge=1, le=1_000_000)
+
+class WellScaleIn(BaseModel):
+    scale: float = Field(ge=0.03, le=0.30)
 
 
 class RoadBuilderGrantIn(BaseModel):
@@ -1057,6 +1064,19 @@ def resize_well(data: WellResizeIn, authorization: str | None = Header(default=N
         asyncio.get_running_loop().create_task(broadcast_well(server_id, well))
     except RuntimeError:
         pass
+    return {"ok": True, "well": well}
+
+
+@app.post("/api/well/scale")
+async def scale_well(data: WellScaleIn, authorization: str | None = Header(default=None), builder_token: str | None = Header(default=None, alias="X-Builder-Token")):
+    with connect() as db:
+        player = require_builder(db, authorization, builder_token)
+        server_id = player["session_server"]
+        well = get_or_create_well(db, server_id)
+        scale = float(data.scale)
+        db.execute("UPDATE server_wells SET scale=? WHERE server_id=?", (scale, server_id))
+        well["scale"] = scale
+    await broadcast_well(server_id, well)
     return {"ok": True, "well": well}
 
 
@@ -2111,6 +2131,8 @@ async def realtime_socket(websocket: WebSocket):
         await websocket.send_json({
             "type": "well",
             "stock": initial_well["stock"],
+            "capacity": initial_well["capacity"],
+            "scale": initial_well["scale"],
             "last_regen_at": initial_well["last_regen_at"]
         })
         with connect() as db:
