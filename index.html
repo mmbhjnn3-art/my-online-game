@@ -495,7 +495,10 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
    <div id="wellResizePanel" class="hidden" style="margin-top:12px">
     <label for="wellCapacityInput">ظرفیت جدید چاه (بطری)</label>
     <input id="wellCapacityInput" type="number" min="1" max="1000000" step="1" value="100">
-    <div class="well-actions" style="margin-top:8px"><button class="primary" id="wellCapacityConfirm">تأیید اندازه</button><button class="secondary" id="wellCapacityCancel">لغو</button></div>
+    <label for="wellScaleInput" style="display:block;margin-top:10px">اندازه ظاهری چاه</label>
+    <input id="wellScaleInput" type="range" min="3" max="30" step="1" value="5" style="width:100%">
+    <div class="notice" id="wellScaleValue">۵٪</div>
+    <div class="well-actions" style="margin-top:8px"><button class="primary" id="wellCapacityConfirm">تأیید تغییرات</button><button class="secondary" id="wellCapacityCancel">لغو</button></div>
    </div>
    <button class="secondary full" id="closeWellBtn">بستن</button>
    <div class="msg" id="wellMsg"></div>
@@ -523,7 +526,7 @@ const SERVER_ORIGIN="https://my-online-game-67j9.onrender.com";
 const API=SERVER_ORIGIN+"/api";
 let authToken=null, selectedServer="1", onlinePlayers=[], syncBusy=false;
 let pendingAppInventorFcmToken=null, registeredAppInventorFcmToken="", fcmRegisterBusy=false;
-let wellState={stock:100,capacity:100,last_regen_at:0};
+let wellState={stock:100,capacity:100,scale:0.05,last_regen_at:0};
 let syncTimer=null,wellTimer=null;
 let realtimeSocket=null, realtimeSendTimer=null, realtimePingTimer=null, realtimeReconnectTimer=null, realtimeRetryCount=0, realtimeLastPong=0;
 let currentAnnouncement=null, announcementPollTimer=null, announcementClockTimer=null, lastAnnouncementId=null;
@@ -752,6 +755,7 @@ async function refreshWell(){
  try{
   const d=await api("/well");
   wellState.capacity=Math.max(1,Number(d.capacity)||100);
+  wellState.scale=Math.max(0.03,Math.min(0.30,Number(d.scale)||wellState.scale||0.05));if(world3d?.wellG)world3d.wellG.scale.setScalar(wellState.scale);
   wellState.stock=Math.max(0,Math.min(wellState.capacity,Number(d.stock)||0));
   wellState.last_regen_at=Number(d.last_regen_at)||0;
   if(!$("wellModal").classList.contains("hidden"))renderWell();
@@ -850,6 +854,7 @@ function applyRealtimeMessage(data){
   if(account&&(Number(account.id)===Number(data.player_id)||account.name===data.player_name)){isCurrentMayor=!!data.is_mayor;delegatedBuilderAccess=!!data.is_mayor;if(!data.is_mayor)builderToken=null;updateBuilderVisibility();render();}
  }else if(data.type==="well"){
   wellState.capacity=Math.max(1,Number(data.capacity)||wellState.capacity||100);
+  wellState.scale=Math.max(0.03,Math.min(0.30,Number(data.scale)||wellState.scale||0.05));if(world3d?.wellG)world3d.wellG.scale.setScalar(wellState.scale);
   wellState.stock=Math.max(0,Math.min(wellState.capacity,Number(data.stock)||0));
   wellState.last_regen_at=Number(data.last_regen_at)||0;
   if(!$("wellModal").classList.contains("hidden"))renderWell();
@@ -1131,7 +1136,7 @@ function initWorld3D(){
  reel.rotation.z=Math.PI/2;reel.position.set(0,40,0);wellG.add(reel);
  const bucket=new THREE.Mesh(new THREE.CylinderGeometry(4,5,7,8),new THREE.MeshStandardMaterial({color:0x9b6037,roughness:.75}));
  bucket.position.set(6,22,0);wellG.add(bucket);
- wellG.position.set(0,0,-145);scene.add(wellG);
+ wellG.position.set(0,0,-145);wellG.scale.setScalar(Math.max(0.03,Math.min(0.30,Number(wellState.scale)||0.05)));scene.add(wellG);
  // درخت‌ها (نمونه‌ای پراکنده)
  const treeMatTrunk=new THREE.MeshStandardMaterial({color:0x67492c,roughness:.9});
  const treeMatLeaf=new THREE.MeshStandardMaterial({color:0x2f7a3e,roughness:.8});
@@ -1610,8 +1615,10 @@ function redrawLandDraft(){
  if(pts.length>1){landPreviewLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0xff2020,linewidth:3}));world3d.scene.add(landPreviewLine);}
  landPlacementPoints.forEach((v,i)=>{
   const last=i===landPlacementPoints.length-1;
-  const marker=new THREE.Mesh(new THREE.SphereGeometry(last?5.2:4.2,16,12),new THREE.MeshBasicMaterial({color:last?0xffd166:0xff3030,depthTest:false}));
-  marker.position.set(v[0],4.2,v[1]);marker.userData.draftPointIndex=i;landPointGroup.add(marker);
+  const hitTarget=new THREE.Mesh(new THREE.SphereGeometry(1.25,10,8),new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false,depthTest:false}));
+  hitTarget.position.set(v[0],0.75,v[1]);hitTarget.userData.draftPointIndex=i;landPointGroup.add(hitTarget);
+  const marker=new THREE.Mesh(new THREE.SphereGeometry(0.12,12,10),new THREE.MeshBasicMaterial({color:last?0xffd166:0xff3030,depthTest:false}));
+  marker.position.set(v[0],0.25,v[1]);marker.userData.draftPointIndex=i;landPointGroup.add(marker);
  });
  // فقط زاویه ضلع فعال نمایش داده می‌شود و برچسب کنار نقطه زردِ قابل‌جابه‌جایی می‌ماند.
  if(landPlacementPoints.length>1){
@@ -2093,6 +2100,8 @@ function drawCity(){
  // تعامل خرید آب و منطق موجودی همچنان به همین نقطه متصل است.
  const wellX=0-left,wellY=-145-top;
  ctx.save();
+ const wellVisualScale=Math.max(0.03,Math.min(0.30,Number(wellState.scale)||0.05))/0.05;
+ ctx.translate(wellX,wellY);ctx.scale(wellVisualScale,wellVisualScale);ctx.translate(-wellX,-wellY);
  // سایه طبیعی زیر سازه
  ctx.fillStyle="rgba(15,25,18,.34)";
  ctx.beginPath();ctx.ellipse(wellX+3,wellY+22,39,14,0,0,Math.PI*2);ctx.fill();
@@ -2645,15 +2654,18 @@ $("wellModal").addEventListener("click",e=>{if(e.target===$("wellModal"))closeWe
 $("wellResizeOption").onclick=async()=>{
  if(!isCreatorAccount())return;
  if(!(await ensureCreatorBuildUnlocked()))return;
- $("wellCapacityInput").value=String(wellState.capacity||100);
+ $("wellCapacityInput").value=String(wellState.capacity||100);$("wellScaleInput").value=String(Math.round((Number(wellState.scale)||0.05)*100));$("wellScaleValue").textContent=$("wellScaleInput").value+"٪";
  $("wellResizePanel").classList.remove("hidden");
 };
 $("wellCapacityCancel").onclick=()=>$("wellResizePanel").classList.add("hidden");
+$("wellScaleInput").oninput=()=>{$("wellScaleValue").textContent=$("wellScaleInput").value+"٪";};
 $("wellCapacityConfirm").onclick=async()=>{
  const capacity=Math.floor(Number($("wellCapacityInput").value));
  if(!Number.isSafeInteger(capacity)||capacity<1||capacity>1000000){$("wellMsg").textContent="اندازه باید بین ۱ تا ۱٬۰۰۰٬۰۰۰ بطری باشد.";return;}
  const btn=$("wellCapacityConfirm");btn.disabled=true;
- try{const d=await api("/well/resize",{capacity},{"X-Builder-Token":builderToken});wellState.capacity=d.well.capacity;wellState.stock=d.well.stock;wellState.last_regen_at=d.well.last_regen_at;$("wellResizePanel").classList.add("hidden");renderWell();$("wellMsg").textContent="اندازه چاه برای همه کاربران این سرور ذخیره شد.";}
+ try{const d=await api("/well/resize",{capacity},{"X-Builder-Token":builderToken});wellState.capacity=d.well.capacity;wellState.stock=d.well.stock;wellState.last_regen_at=d.well.last_regen_at;
+  const scale=Math.max(0.03,Math.min(0.30,Number($("wellScaleInput").value)/100));const sd=await api("/well/scale",{scale},{"X-Builder-Token":builderToken});wellState.scale=sd.well.scale;if(world3d?.wellG)world3d.wellG.scale.setScalar(wellState.scale);
+  $("wellResizePanel").classList.add("hidden");renderWell();$("wellMsg").textContent="اندازه چاه برای همه کاربران این سرور ذخیره شد.";}
  catch(e){$("wellMsg").textContent=e.message||"تغییر اندازه انجام نشد.";}finally{btn.disabled=false;}
 };
 $("buyWellWaterBtn").onclick=async()=>{
@@ -2664,6 +2676,7 @@ $("buyWellWaterBtn").onclick=async()=>{
   const d=await api("/well/buy",{});
   account=d.state;account.lastActiveAt=Date.now();
   wellState.capacity=Math.max(1,Number(d.well.capacity)||wellState.capacity||100);
+  wellState.scale=Math.max(0.03,Math.min(0.30,Number(d.well.scale)||wellState.scale||0.05));if(world3d?.wellG)world3d.wellG.scale.setScalar(wellState.scale);
   wellState.stock=Number(d.well.stock)||0;
   wellState.last_regen_at=Number(d.well.last_regen_at)||0;
   log("از چاه آب یک بطری آب خریدی.");
