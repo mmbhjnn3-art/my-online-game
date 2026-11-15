@@ -125,6 +125,7 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_sessions_server_seen
             ON sessions(server_id, last_seen)
         """)
+        db.execute("ALTER TABLE server_wells ADD COLUMN IF NOT EXISTS capacity INTEGER NOT NULL DEFAULT 100")
         db.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE")
         db.execute("""
             CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -148,6 +149,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS server_wells (
                 server_id TEXT PRIMARY KEY,
                 stock INTEGER NOT NULL DEFAULT 100,
+                capacity INTEGER NOT NULL DEFAULT 100,
                 last_regen_at BIGINT NOT NULL
             )
         """)
@@ -413,42 +415,44 @@ def get_or_create_well(db, server_id, lock=True):
     """Return the shared well for the selected game server only."""
     now = int(time.time())
     db.execute(
-        """INSERT INTO server_wells(server_id, stock, last_regen_at)
-        VALUES(?, 100, ?) ON CONFLICT(server_id) DO NOTHING""",
+        """INSERT INTO server_wells(server_id, stock, capacity, last_regen_at)
+        VALUES(?, 100, 100, ?) ON CONFLICT(server_id) DO NOTHING""",
         (server_id, now)
     )
     suffix = " FOR UPDATE" if lock else ""
     row = db.execute(
-        "SELECT server_id, stock, last_regen_at FROM server_wells WHERE server_id=?" + suffix,
+        "SELECT server_id, stock, capacity, last_regen_at FROM server_wells WHERE server_id=?" + suffix,
         (server_id,)
     ).fetchone()
-    stock = max(0, min(100, int(row["stock"])))
+    capacity = max(1, int(row.get("capacity", 100)))
+    stock = max(0, min(capacity, int(row["stock"])))
     last_regen_at = int(row["last_regen_at"])
-    if stock >= 100:
+    if stock >= capacity:
         if last_regen_at != now:
             last_regen_at = now
             db.execute(
-                "UPDATE server_wells SET stock=100, last_regen_at=? WHERE server_id=?",
-                (last_regen_at, server_id)
+                "UPDATE server_wells SET stock=?, last_regen_at=? WHERE server_id=?",
+                (capacity, last_regen_at, server_id)
             )
     else:
         minutes = max(0, (now - last_regen_at) // 60)
         if minutes:
-            stock = min(100, stock + minutes)
+            stock = min(capacity, stock + minutes)
             last_regen_at += minutes * 60
-            if stock >= 100:
+            if stock >= capacity:
                 last_regen_at = now
             db.execute(
                 "UPDATE server_wells SET stock=?, last_regen_at=? WHERE server_id=?",
                 (stock, last_regen_at, server_id)
             )
-    return {"server_id": server_id, "stock": stock, "last_regen_at": last_regen_at}
+    return {"server_id": server_id, "stock": stock, "capacity": capacity, "last_regen_at": last_regen_at}
 
 
 async def broadcast_well(server_id, well):
     await ws_send_group(server_id, {
         "type": "well",
         "stock": well["stock"],
+        "capacity": well.get("capacity", 100),
         "last_regen_at": well["last_regen_at"]
     })
 
@@ -476,6 +480,10 @@ class ShopBuyIn(BaseModel):
 
 class BuilderUnlockIn(BaseModel):
     password: str = Field(default="", max_length=128)
+
+
+class WellResizeIn(BaseModel):
+    capacity: int = Field(ge=1, le=1_000_000)
 
 
 class RoadBuilderGrantIn(BaseModel):
@@ -1028,6 +1036,27 @@ async def buy_well_water(authorization: str | None = Header(default=None)):
 
     await broadcast_well(server_id, well)
     return {"ok": True, "state": state, "well": well}
+
+
+@app.post("/api/well/resize")
+def resize_well(data: WellResizeIn, authorization: str | None = Header(default=None), builder_token: str | None = Header(default=None, alias="X-Builder-Token")):
+    with connect() as db:
+        player = require_builder(db, authorization, builder_token)
+        server_id = player["session_server"]
+        well = get_or_create_well(db, server_id)
+        capacity = int(data.capacity)
+        stock = min(int(well["stock"]), capacity)
+        now = int(time.time())
+        db.execute("UPDATE server_wells SET capacity=?, stock=?, last_regen_at=? WHERE server_id=?", (capacity, stock, now, server_id))
+        well.update({"capacity": capacity, "stock": stock, "last_regen_at": now})
+    # All clients in this server receive the new capacity and stock.
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        loop.create_task(broadcast_well(server_id, well))
+    except RuntimeError:
+        pass
+    return {"ok": True, "well": well}
 
 
 @app.get("/api/players")
