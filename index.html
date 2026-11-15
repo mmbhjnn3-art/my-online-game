@@ -88,6 +88,8 @@ body.immersive-camera #city3dCanvas{display:block!important;width:100%!important
 #busStop3DPanel .row button{flex:1}
 
 body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:none;z-index:45;margin:0;padding:0;background:transparent;border:0;border-radius:0}
+#builderQuickButton{display:none;position:fixed;right:12px;bottom:24px;z-index:100110;background:#ffd166;color:#202018;border:2px solid #fff0b5;border-radius:12px;padding:11px 15px;font-weight:900;box-shadow:0 4px 15px #0008}
+body.immersive-camera #builderQuickButton.creator-visible{display:block}
 /* افزوده‌شده: صفحه اختصاصی هنگام قطع ارتباط */
 #offlineScreen{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;overflow:auto;background:radial-gradient(ellipse at top,#244d3e,#0c1c18 72%);padding:20px}
 #offlineScreen.hidden{display:none!important}
@@ -333,6 +335,7 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
  <p class="notice">حساب کاربری در همه سرورها مشترک است؛ با همان نام و رمز وارد هر سروری شو.</p>
 </section>
 
+<button id="builderQuickButton" type="button">🔧 ساخت</button>
 <section id="game" class="hidden">
  <div id="gameAnnouncement" class="card hidden" style="border:2px solid var(--gold);text-align:center"><h2>📢 اطلاعیه بروزرسانی</h2><div class="announcement-text"></div><div class="announcement-countdown" style="font-size:22px;color:var(--gold);font-weight:bold;margin-top:10px"></div></div>
  <div class="card">
@@ -490,8 +493,17 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
    <h2 id="wellTitle">💧 چاه آب شهر</h2>
    <p class="notice">از اینجا می‌توانی آب بخری. ظرفیت چاه ۱۰۰ بطری است.</p>
    <div class="well-stock"><span>موجودی آب چاه</span><strong id="wellStock">۱۰۰ از ۱۰۰</strong><small id="wellRegenInfo">هر دقیقه یک بطری به چاه اضافه می‌شود.</small></div>
-   <div class="item"><span>💧 قیمت هر بطری آب</span><b>۲٬۰۰۰ تومان</b></div>
-   <div class="well-actions"><button class="primary" id="buyWellWaterBtn">خرید یک آب</button><button class="secondary" id="closeWellBtn">بستن</button></div>
+   <div class="item"><span>💧 برداشت هر بطری آب</span><b>۲٬۰۰۰ تومان</b></div>
+   <div class="well-actions"><button class="primary" id="buyWellWaterBtn">برداشت آب</button><button class="secondary" id="closeWellBtn">بستن</button></div>
+   <div id="wellCreatorActions" class="hidden" style="margin-top:10px">
+    <button class="secondary full" id="wellBuilderUnlockButton" type="button">🔐 ورود سازنده و رمز ساخت</button>
+    <button class="secondary full hidden" id="wellResizeToggle" type="button" style="margin-top:8px">📏 تغییر اندازه چاه</button>
+    <div id="wellResizePanel" class="hidden" style="margin-top:8px;padding:10px;background:#10271f;border-radius:12px">
+     <label for="wellSizeRange">اندازه چاه: <b id="wellSizeValue">۱٫۰ برابر</b></label>
+     <input id="wellSizeRange" type="range" min="0.5" max="3" step="0.1" value="1" style="width:100%">
+     <button class="primary full" id="wellResizeSave" type="button">ذخیره اندازه چاه</button>
+    </div>
+   </div>
    <div class="msg" id="wellMsg"></div>
   </div>
  </div>
@@ -517,7 +529,7 @@ const SERVER_ORIGIN="https://my-online-game-67j9.onrender.com";
 const API=SERVER_ORIGIN+"/api";
 let authToken=null, selectedServer="1", onlinePlayers=[], syncBusy=false;
 let pendingAppInventorFcmToken=null, registeredAppInventorFcmToken="", fcmRegisterBusy=false;
-let wellState={stock:100,last_regen_at:0};
+let wellState={stock:100,last_regen_at:0,size:1};
 let syncTimer=null,wellTimer=null;
 let realtimeSocket=null, realtimeSendTimer=null, realtimePingTimer=null, realtimeReconnectTimer=null, realtimeRetryCount=0, realtimeLastPong=0;
 let currentAnnouncement=null, announcementPollTimer=null, announcementClockTimer=null, lastAnnouncementId=null;
@@ -747,6 +759,8 @@ async function refreshWell(){
   const d=await api("/well");
   wellState.stock=Math.max(0,Math.min(100,Number(d.stock)||0));
   wellState.last_regen_at=Number(d.last_regen_at)||0;
+  wellState.size=Math.max(.5,Math.min(3,Number(d.size)||1));
+  applyWellSize3D();
   if(!$("wellModal").classList.contains("hidden"))renderWell();
  }catch(e){/* WebSocket may still deliver updates; retry on next poll. */}
 }
@@ -758,7 +772,14 @@ function renderWell(){
  $("buyWellWaterBtn").disabled=cannotBuy;
  $("buyWellWaterBtn").style.opacity=cannotBuy?".55":"1";
  $("wellRegenInfo").textContent=stock<1?"چاه خالی است؛ برای اضافه شدن یک آب یک دقیقه صبر کن.":(stock<100?"هر دقیقه یک بطری به چاه اضافه می‌شود.":"چاه پر است.");
+ const creator=isCreatorAccount();
+ $("wellCreatorActions").classList.toggle("hidden",!creator);
+ $("wellBuilderUnlockButton").classList.toggle("hidden",!creator||!!builderToken);
+ $("wellResizeToggle").classList.toggle("hidden",!creator||!builderToken);
+ $("wellSizeRange").value=String(wellState.size||1);
+ $("wellSizeValue").textContent=(Number(wellState.size||1)).toFixed(1).replace(".","٫")+" برابر";
 }
+function applyWellSize3D(){if(world3d&&world3d.wellG)world3d.wellG.scale.setScalar(Math.max(.5,Math.min(3,Number(wellState.size)||1)));}
 function openWell(){if(!account)return;$("wellMsg").textContent="";renderWell();refreshWell();$("wellModal").classList.remove("hidden");}
 function closeWell(){$("wellModal").classList.add("hidden");}
 function renderClock(){
@@ -842,6 +863,8 @@ function applyRealtimeMessage(data){
  }else if(data.type==="well"){
   wellState.stock=Math.max(0,Math.min(100,Number(data.stock)||0));
   wellState.last_regen_at=Number(data.last_regen_at)||0;
+  wellState.size=Math.max(.5,Math.min(3,Number(data.size)||1));
+  applyWellSize3D();
   if(!$("wellModal").classList.contains("hidden"))renderWell();
  }
  updateOnlineCount();drawCity();
@@ -1018,12 +1041,10 @@ function tryUnlockOrientation(){
 }
 // ========== موتور سه‌بعدی (Three.js) برای اول‌شخص و سوم‌شخص ==========
 let world3d=null;
-// مقیاس مدل: قد نهایی کاراکتر ۱٫۸ متر
-const PLAYER_MODEL_SCALE=0.048;
-// سرعت حرکت: ۱۰ کیلومتر بر ساعت (۲٫۷۷۷۸ متر بر ثانیه)
-const PLAYER_SPEED_MPS=10/3.6;
 function createPlayerMesh(colorBody="#2874bd",colorHead="#f3c6a0"){
  const g=new THREE.Group();
+ // کل مدل از ۳۷٫۵ واحد به قد واقعی ۱٫۸ متر تبدیل می‌شود.
+ g.scale.setScalar(1.8/37.5);
  const body=new THREE.Mesh(new THREE.CapsuleGeometry(7,14,4,8),new THREE.MeshStandardMaterial({color:colorBody,roughness:.7}));
  body.position.y=14;g.add(body);
  const head=new THREE.Mesh(new THREE.SphereGeometry(7.5,12,10),new THREE.MeshStandardMaterial({color:colorHead,roughness:.55}));
@@ -1032,7 +1053,6 @@ function createPlayerMesh(colorBody="#2874bd",colorHead="#f3c6a0"){
  eyeL.position.set(-2.5,31,6.2);g.add(eyeL);
  const eyeR=eyeL.clone();eyeR.position.x=2.5;g.add(eyeR);
  g.castShadow=true;g.userData={body,head};
- g.scale.setScalar(PLAYER_MODEL_SCALE);
  return g;
 }
 function initWorld3D(){
@@ -1042,7 +1062,7 @@ function initWorld3D(){
  const scene=new THREE.Scene();
  scene.background=new THREE.Color(0x87b8e0);
  scene.fog=new THREE.Fog(0x87b8e0,420,2200);
- const camera=new THREE.PerspectiveCamera(65,16/9,0.05,5000);
+ const camera=new THREE.PerspectiveCamera(65,16/9,2,5000);
  const renderer=new THREE.WebGLRenderer({canvas:c3,antialias:true,powerPreference:"high-performance"});
  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
  renderer.shadowMap.enabled=true;
@@ -1122,7 +1142,7 @@ function initWorld3D(){
  reel.rotation.z=Math.PI/2;reel.position.set(0,40,0);wellG.add(reel);
  const bucket=new THREE.Mesh(new THREE.CylinderGeometry(4,5,7,8),new THREE.MeshStandardMaterial({color:0x9b6037,roughness:.75}));
  bucket.position.set(6,22,0);wellG.add(bucket);
- wellG.position.set(0,0,-145);scene.add(wellG);
+ wellG.position.set(0,0,-145);wellG.scale.setScalar(Math.max(.5,Math.min(3,Number(wellState.size)||1)));scene.add(wellG);
  // درخت‌ها (نمونه‌ای پراکنده)
  const treeMatTrunk=new THREE.MeshStandardMaterial({color:0x67492c,roughness:.9});
  const treeMatLeaf=new THREE.MeshStandardMaterial({color:0x2f7a3e,roughness:.8});
@@ -1291,13 +1311,12 @@ function syncRoads3D(){
   const key=t.x+","+t.y;seen.add(key);
   if(world3d.roadMeshes.has(key))return;
   const g=new THREE.Group();
-  // ضخامت آسفالت ۱۲ سانتی‌متر
-  const mesh=new THREE.Mesh(new THREE.BoxGeometry(48,0.12,48),asphaltMat);
-  mesh.position.y=0.06;mesh.receiveShadow=true;mesh.castShadow=true;g.add(mesh);
-  // خط‌کشی وسط بر اساس orientation
+  // هر قطعه ۴۸ متر طول و دقیقاً ۳ متر عرض دارد.
   const orient=Number(t.orientation)||0;
-  const dash=new THREE.Mesh(new THREE.BoxGeometry(orient===1?3:28,0.025,orient===1?28:3),dashMat);
-  dash.position.y=0.135;g.add(dash);
+  const mesh=new THREE.Mesh(new THREE.BoxGeometry(orient===1?3:48,1.3,orient===1?48:3),asphaltMat);
+  mesh.position.y=0.65;mesh.receiveShadow=true;mesh.castShadow=true;g.add(mesh);
+  const dash=new THREE.Mesh(new THREE.BoxGeometry(orient===1?0.25:28,0.3,orient===1?28:0.25),dashMat);
+  dash.position.y=1.4;g.add(dash);
   g.position.set(Number(t.x)*48+24,0,Number(t.y)*48+24);
   world3d.roadsGroup.add(g);
   world3d.roadMeshes.set(key,g);
@@ -1351,17 +1370,17 @@ function updateCamera3D(){
  world3d.localPlayer.visible=cameraMode!=="first";
  const cam=world3d.camera;
  if(cameraMode==="first"){
-  cam.position.set(px,30*PLAYER_MODEL_SCALE,pz);
-  cam.lookAt(px+fx*50*PLAYER_MODEL_SCALE,28*PLAYER_MODEL_SCALE,pz+fz*50*PLAYER_MODEL_SCALE);
+  cam.position.set(px,1.44,pz);
+  cam.lookAt(px+fx*2.4,1.34,pz+fz*2.4);
  }else{
-  // دوربین پشت سر با فاصله و ارتفاع متناسب با قد ۱٫۸ متری
-  const dist=110*PLAYER_MODEL_SCALE,height=52*PLAYER_MODEL_SCALE;
+  // همان زاویه و کادر سوم‌شخص قبلی، متناسب با قد ۱٫۸ متری.
+  const dist=110*(1.8/37.5),height=52*(1.8/37.5);
   const tx=px-fx*dist,tz=pz-fz*dist;
   const k=0.16;
   cam.position.x+=(tx-cam.position.x)*k;
   cam.position.y+=(height-cam.position.y)*k;
   cam.position.z+=(tz-cam.position.z)*k;
-  cam.lookAt(px,24*PLAYER_MODEL_SCALE,pz);
+  cam.lookAt(px,24*(1.8/37.5),pz);
  }
 }
 function resize3D(){
@@ -1385,6 +1404,7 @@ function render3D(){
 function enterImmersiveCamera(){
  if(immersiveActive)return;
  immersiveActive=true;
+ updateBuilderVisibility();
  document.body.classList.add("immersive-camera");
  switchTab("city");
  resizeCityCanvasForMode();
@@ -1402,9 +1422,9 @@ function enterImmersiveCamera(){
    world3d.localPlayer.position.set(Number(account.playerX)||0,0,Number(account.playerY)||0);
    const fx=playerFacingX,fz=playerFacingY;
    world3d.camera.position.set(
-    (Number(account.playerX)||0)-fx*95*PLAYER_MODEL_SCALE,
-    55*PLAYER_MODEL_SCALE,
-    (Number(account.playerY)||0)-fz*95*PLAYER_MODEL_SCALE
+    (Number(account.playerX)||0)-fx*(95*1.8/37.5),
+    55*1.8/37.5,
+    (Number(account.playerY)||0)-fz*(95*1.8/37.5)
    );
   }
  }else{
@@ -1508,6 +1528,7 @@ function updateBuilderVisibility(){
  if(!controls)return;
  const allowed=canUseRoadBuilder();
  controls.classList.toggle("hidden",!allowed);
+ $("builderQuickButton").classList.toggle("creator-visible",!!(immersiveActive&&isCreatorAccount()));
  $("adminManagementSection").classList.toggle("hidden",!isCreatorAccount());
  $("updateManagementSection").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  $("mapAddMarkerButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
@@ -1852,6 +1873,7 @@ $("builderButton").onclick=async()=>{
  try{
   const d=await api("/builder/unlock",{password:pass});
   builderToken=d.builder_token;builderMode=true;rotateRoadMode=false;updateBuilderVisibility();
+  if(!$("wellModal").classList.contains("hidden"))renderWell();
   $("asphaltToolButton").classList.remove("hidden");$("rotateRoadButton").classList.remove("hidden");
   if(isCreatorAccount()){$("adminPlayersButton").disabled=false;$("mapAddMarkerButton").classList.remove("hidden");}
   $("builderHint").textContent=isCreatorAccount()?"حالت آسفالت فعال است. روی خانه خالی بزن تا بسازی؛ روی آسفالت بزن تا حذف کنی.":"دسترسی ساخت آسفالت در این سرور فعال شد؛ ساخت، چرخاندن و حذف آسفالت مجاز است.";
@@ -2003,19 +2025,14 @@ function drawCity(){
  visibleRoads.forEach(t=>{
   const wx=Number(t.x)*48,wy=Number(t.y)*48;
   const x=wx-left,y=wy-top;
-  if(x> w || x+48<0 || y>h || y+48<0)return;
-  ctx.fillStyle="#343b3e";ctx.fillRect(x,y,48,48);
-  const has=(dx,dy)=>visibleRoads.some(v=>Number(v.x)===Number(t.x)+dx&&Number(v.y)===Number(t.y)+dy);
-  ctx.strokeStyle="#aeb5b3";ctx.lineWidth=2;ctx.beginPath();
-  if(!has(0,-1)){ctx.moveTo(x+1,y+1);ctx.lineTo(x+47,y+1);}
-  if(!has(0,1)){ctx.moveTo(x+1,y+47);ctx.lineTo(x+47,y+47);}
-  if(!has(-1,0)){ctx.moveTo(x+1,y+1);ctx.lineTo(x+1,y+47);}
-  if(!has(1,0)){ctx.moveTo(x+47,y+1);ctx.lineTo(x+47,y+47);}
-  ctx.stroke();
-  ctx.save();ctx.strokeStyle="#f0f0f0";ctx.lineWidth=2;ctx.setLineDash([7,6]);
+  const vertical=Number(t.orientation)===1;
+  if(x>w||x+48<0||y>h||y+48<0)return;
+  ctx.fillStyle="#343b3e";
+  if(vertical)ctx.fillRect(x+22.5,y,3,48);else ctx.fillRect(x,y+22.5,48,3);
+  ctx.save();ctx.strokeStyle="#f0f0f0";ctx.lineWidth=1;ctx.setLineDash([7,6]);
   ctx.beginPath();
-  if(Number(t.orientation)===1){ctx.moveTo(x+24,y+4);ctx.lineTo(x+24,y+44);}
-  else{ctx.moveTo(x+4,y+24);ctx.lineTo(x+44,y+24);}
+  if(vertical){ctx.moveTo(x+24,y+2);ctx.lineTo(x+24,y+46);}
+  else{ctx.moveTo(x+2,y+24);ctx.lineTo(x+46,y+24);}
   ctx.stroke();ctx.restore();
  });
 
@@ -2234,7 +2251,8 @@ function drawOverviewMap(){
  (roadTiles||[]).forEach(t=>{
   const x=wx(Number(t.x)*48),y=wy(Number(t.y)*48);
   const size=48*scale;
-  mapCtx.fillRect(x,y,size,size);
+  if(Number(t.orientation)===1)mapCtx.fillRect(x+22.5*scale,y,3*scale,size);
+  else mapCtx.fillRect(x,y+22.5*scale,size,3*scale);
  });
  // Main city roads and central plaza.
  mapCtx.fillStyle="#343b3e";
@@ -2402,7 +2420,7 @@ function movePlayer(){
  if(immersiveActive&&(cameraMode==="third"||cameraMode==="first")){
   // جهت بدن همواره با زاویه دوربین هماهنگ است؛ محور افقی جوی‌استیک فقط حرکت جانبی می‌دهد.
   syncFacingFromYaw();
-  const speed=PLAYER_SPEED_MPS*(dt/1000);
+  const speed=.22*dt;
   const forward=-moveY;
   const strafe=moveX;
   const rightX=Math.cos(lookYaw), rightZ=Math.sin(lookYaw);
@@ -2415,7 +2433,7 @@ function movePlayer(){
   render3D();
  }else if(moveX||moveY){
    const len=Math.hypot(moveX,moveY)||1;
-   const speed=PLAYER_SPEED_MPS*(dt/1000);
+   const speed=.19*dt;
    updatePlayerFacing(moveX,moveY);
    lookYaw=Math.atan2(playerFacingX,-playerFacingY);
    account.playerX=Math.max(-CITY_HALF,Math.min(CITY_HALF,(Number(account.playerX)||0)+(moveX/len)*speed));
@@ -2675,6 +2693,21 @@ document.querySelectorAll("[data-buy]").forEach(btn=>btn.onclick=async()=>{
  }catch(e){$("shopMsg").textContent=e.message;}
  finally{btn.disabled=false;}
 });
+$("builderQuickButton").onclick=()=>$("builderButton").click();
+$("wellBuilderUnlockButton").onclick=()=>$("builderButton").click();
+$("wellResizeToggle").onclick=()=>$("wellResizePanel").classList.toggle("hidden");
+$("wellSizeRange").oninput=e=>{$("wellSizeValue").textContent=Number(e.target.value).toFixed(1).replace(".","٫")+" برابر";};
+$("wellResizeSave").onclick=async()=>{
+ if(!isCreatorAccount()||!builderToken)return;
+ const size=Math.max(.5,Math.min(3,Number($("wellSizeRange").value)||1));
+ $("wellResizeSave").disabled=true;$("wellMsg").textContent="در حال ذخیره اندازه چاه...";
+ try{
+  const d=await api("/well/resize",{size},{"X-Builder-Token":builderToken});
+  wellState.size=Number(d.well.size)||size;applyWellSize3D();renderWell();
+  $("wellMsg").textContent="اندازه جدید چاه برای همه بازیکنان این سرور ذخیره شد.";
+ }catch(e){$("wellMsg").textContent=e.message||"ذخیره اندازه چاه انجام نشد.";}
+ finally{$("wellResizeSave").disabled=false;}
+};
 $("closeWellBtn").onclick=closeWell;
 $("wellModal").addEventListener("click",e=>{if(e.target===$("wellModal"))closeWell()});
 $("buyWellWaterBtn").onclick=async()=>{
