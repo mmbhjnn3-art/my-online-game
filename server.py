@@ -526,8 +526,8 @@ class AdminZeroResourceIn(BaseModel):
 class RoadTileIn(BaseModel):
     x: int = Field(ge=-100, le=99)
     y: int = Field(ge=-100, le=99)
-    tile_type: str = Field(default="asphalt", pattern="^(asphalt|right_turn|left_turn|three_way|four_way|u_turn|roundabout)$")
-    orientation: int = Field(default=0, ge=0, le=3)
+    tile_type: str = Field(default="asphalt", pattern="^asphalt$")
+    orientation: int = Field(default=0, ge=0, le=1)
 
 
 class RoadTilePositionIn(BaseModel):
@@ -1427,17 +1427,17 @@ async def rotate_road_tile(
     with connect() as db:
         player = require_road_builder(db, authorization, x_builder_token)
         row = db.execute(
-            "SELECT orientation, tile_type FROM road_tiles WHERE server_id=? AND tile_x=? AND tile_y=?",
+            "SELECT orientation FROM road_tiles WHERE server_id=? AND tile_x=? AND tile_y=?",
             (player["session_server"], data.x, data.y)
         ).fetchone()
         if row is None:
             raise HTTPException(404, "در این خانه آسفالت وجود ندارد.")
-        orientation = (int(row["orientation"] or 0) + 1) % 4
+        orientation = 1 - int(row["orientation"] or 0)
         db.execute(
             "UPDATE road_tiles SET orientation=?, updated_at=?, updated_by=? WHERE server_id=? AND tile_x=? AND tile_y=?",
             (orientation, int(time.time()), player["id"], player["session_server"], data.x, data.y)
         )
-    tile = {"x": data.x, "y": data.y, "tile_type": row["tile_type"] or "asphalt", "orientation": orientation}
+    tile = {"x": data.x, "y": data.y, "tile_type": "asphalt", "orientation": orientation}
     await ws_send_group(player["session_server"], {"type": "road_tile", "tile": tile})
     return {"ok": True, "tile": tile}
 
