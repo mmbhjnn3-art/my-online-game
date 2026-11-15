@@ -1036,7 +1036,7 @@ let world3d=null;
 // مقیاس مدل: قد نهایی کاراکتر ۱٫۸ متر
 const PLAYER_MODEL_SCALE=0.048;
 // سرعت حرکت: ۱۰ کیلومتر بر ساعت (۲٫۷۷۷۸ متر بر ثانیه)
-const PLAYER_SPEED_MPS=10/3.6;
+const PLAYER_SPEED_MPS=50/3.6;
 function createPlayerMesh(colorBody="#2874bd",colorHead="#f3c6a0"){
  const g=new THREE.Group();
  const body=new THREE.Mesh(new THREE.CapsuleGeometry(7,14,4,8),new THREE.MeshStandardMaterial({color:colorBody,roughness:.7}));
@@ -1611,14 +1611,14 @@ function redrawLandDraft(){
  if(landPreviewLine){world3d.scene.remove(landPreviewLine);landPreviewLine.geometry.dispose();landPreviewLine.material.dispose();landPreviewLine=null;}
  if(landPointGroup){world3d.scene.remove(landPointGroup);landPointGroup.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){if(o.material.map)o.material.map.dispose();o.material.dispose();}});landPointGroup=null;}
  landPointGroup=new THREE.Group();
- const pts=landPlacementPoints.map(v=>new THREE.Vector3(v[0],2.8,v[1]));
+ const pts=landPlacementPoints.map(v=>new THREE.Vector3(v[0],0.08,v[1]));
  if(pts.length>1){landPreviewLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),new THREE.LineBasicMaterial({color:0xff2020,linewidth:3}));world3d.scene.add(landPreviewLine);}
  landPlacementPoints.forEach((v,i)=>{
   const last=i===landPlacementPoints.length-1;
   const hitTarget=new THREE.Mesh(new THREE.SphereGeometry(1.25,10,8),new THREE.MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false,depthTest:false}));
-  hitTarget.position.set(v[0],0.75,v[1]);hitTarget.userData.draftPointIndex=i;landPointGroup.add(hitTarget);
+  hitTarget.position.set(v[0],0.35,v[1]);hitTarget.userData.draftPointIndex=i;landPointGroup.add(hitTarget);
   const marker=new THREE.Mesh(new THREE.SphereGeometry(0.12,12,10),new THREE.MeshBasicMaterial({color:last?0xffd166:0xff3030,depthTest:false}));
-  marker.position.set(v[0],0.25,v[1]);marker.userData.draftPointIndex=i;landPointGroup.add(marker);
+  marker.position.set(v[0],0.10,v[1]);marker.userData.draftPointIndex=i;landPointGroup.add(marker);
  });
  // فقط زاویه ضلع فعال نمایش داده می‌شود و برچسب کنار نقطه زردِ قابل‌جابه‌جایی می‌ماند.
  if(landPlacementPoints.length>1){
@@ -1631,7 +1631,7 @@ function redrawLandDraft(){
   const label=makeLandMeasureSprite("طول: "+distanceText+" متر  |  زاویه: "+angleText);
   // برچسب کنار نقطه زردِ جدید قرار می‌گیرد، نه روی وسط خط اندازه‌گیری.
   const dx=b[0]-a[0],dz=b[1]-a[1],len=Math.hypot(dx,dz)||1;
-  label.position.set(b[0]-(dz/len)*12,14,b[1]+(dx/len)*12);landPointGroup.add(label);
+  label.position.set((a[0]+b[0])/2,2.2,(a[1]+b[1])/2);label.scale.set(18,4.5,1);landPointGroup.add(label);
   $("gpsStatus").textContent="نقاط: "+landPlacementPoints.length+" · طول: "+distanceText+" متر · زاویه حرکت: "+angleText+" · چپ منفی / راست مثبت · نقطه زرد آخر را جابه‌جا کن.";
  }else if(landPlacementPoints.length===1){
   $("gpsStatus").textContent="نقاط: ۱ · نقطه بعدی را برای اندازه‌گیری زاویه مشخص کن.";
@@ -1670,14 +1670,8 @@ function makeLandTexture(type){
  const t=new THREE.CanvasTexture(c);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.repeat.set(2,2);t.colorSpace=THREE.SRGBColorSpace;return t;
 }
 function createLandSign(plot){
- const group=new THREE.Group();const post=new THREE.Mesh(new THREE.BoxGeometry(3,22,3),new THREE.MeshStandardMaterial({color:0x704523}));post.position.y=11;group.add(post);
- const cv=document.createElement("canvas");cv.width=512;cv.height=320;const cx=cv.getContext("2d");
- cx.fillStyle="#17372d";cx.fillRect(0,0,512,320);cx.strokeStyle="#ffd166";cx.lineWidth=12;cx.strokeRect(7,7,498,306);
- cx.fillStyle="#fff2c4";cx.textAlign="center";cx.font="bold 42px sans-serif";
- const names={agricultural:"زمین کشاورزی",residential:"زمین مسکونی",industrial:"زمین صنعتی"};cx.fillText(names[plot.land_type]||"زمین",256,68);
- cx.font="bold 32px sans-serif";let line=plot.sold?"فروخته شد به شهردار "+(plot.sold_city||""):(plot.price?"قیمت: "+Number(plot.price).toLocaleString("fa-IR")+" تومان":"برای تعیین قیمت کلیک کن");
- cx.fillText(line.slice(0,26),256,150);
- // محاسبه مساحت چندضلعی زمین با فرمول کفشدوزکی
+ const group=new THREE.Group();
+ // مساحت دقیق زمین برای اندازه متناسب تابلو
  const landPoints=Array.isArray(plot.points)?plot.points:[];
  let twiceArea=0;
  for(let i=0;i<landPoints.length;i++){
@@ -1686,21 +1680,28 @@ function createLandSign(plot){
   twiceArea+=Number(a[0])*Number(b[1])-Number(b[0])*Number(a[1]);
  }
  let areaM2=landPoints.length>=3?Math.round(Math.abs(twiceArea)/2):0;
- // اگر چهار ضلع یک چهارضلعی عملاً هم‌اندازه باشند و شکل نزدیک به مربع باشد،
- // خطای جزئی زاویه/جای‌گذاری GPS نباید مساحت مربع را کمتر از طول‌ضلع × طول‌ضلع نشان دهد.
  if(landPoints.length===4){
-  const sideLengths=landPoints.map((p,i)=>{
-   const q=landPoints[(i+1)%4];
-   return Math.hypot(Number(q[0])-Number(p[0]),Number(q[1])-Number(p[1]));
-  });
+  const sideLengths=landPoints.map((p,i)=>{const q=landPoints[(i+1)%4];return Math.hypot(Number(q[0])-Number(p[0]),Number(q[1])-Number(p[1]));});
   const avgSide=sideLengths.reduce((sum,v)=>sum+v,0)/4;
   const sidesNearlyEqual=avgSide>0&&sideLengths.every(v=>Math.abs(v-avgSide)<=avgSide*0.03);
   const squareArea=Math.round(avgSide*avgSide);
   if(sidesNearlyEqual&&areaM2>=squareArea*0.90)areaM2=squareArea;
  }
+ // تابلو و پایه با بزرگ شدن مساحت زمین به‌تدریج بزرگ می‌شوند.
+ const signScale=Math.max(0.38,Math.min(2.4,Math.sqrt(Math.max(1,areaM2))/10));
+ const postHeight=5+9*signScale;
+ const post=new THREE.Mesh(new THREE.BoxGeometry(0.22*signScale,postHeight,0.22*signScale),new THREE.MeshStandardMaterial({color:0x704523}));
+ post.position.y=postHeight/2;group.add(post);
+ const cv=document.createElement("canvas");cv.width=512;cv.height=320;const cx=cv.getContext("2d");
+ cx.fillStyle="#17372d";cx.fillRect(0,0,512,320);cx.strokeStyle="#ffd166";cx.lineWidth=12;cx.strokeRect(7,7,498,306);
+ cx.fillStyle="#fff2c4";cx.textAlign="center";cx.font="bold 42px sans-serif";
+ const names={agricultural:"زمین کشاورزی",residential:"زمین مسکونی",industrial:"زمین صنعتی"};cx.fillText(names[plot.land_type]||"زمین",256,68);
+ cx.font="bold 32px sans-serif";let line=plot.sold?"فروخته شد به شهردار "+(plot.sold_city||""):(plot.price?"قیمت: "+Number(plot.price).toLocaleString("fa-IR")+" تومان":"برای تعیین قیمت کلیک کن");
+ cx.fillText(line.slice(0,26),256,150);
  cx.font="bold 30px sans-serif";cx.fillText("مساحت: "+areaM2.toLocaleString("fa-IR")+" متر مربع",256,240);
  const tex=new THREE.CanvasTexture(cv);tex.colorSpace=THREE.SRGBColorSpace;
- const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthTest:false}));sprite.scale.set(42,26.25,1);sprite.position.y=37.5;sprite.userData.plotId=Number(plot.id);
+ const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthTest:false}));
+ sprite.scale.set(22*signScale,13.75*signScale,1);sprite.position.y=postHeight+7*signScale;sprite.userData.plotId=Number(plot.id);
  group.add(sprite);group.userData.plotId=Number(plot.id);group.position.set(plot.center_x,0,plot.center_y);return group;
 }
 function syncLandPlots3D(){
@@ -1715,7 +1716,7 @@ function syncLandPlots3D(){
   const pts=(plot.points||[]).map(p=>new THREE.Vector2(Number(p[0])-Number(plot.center_x),Number(p[1])-Number(plot.center_y)));if(pts.length<3)return;
   const shape=new THREE.Shape(pts),geo=new THREE.ShapeGeometry(shape);
   const mat=new THREE.MeshStandardMaterial({map:makeLandTexture(plot.land_type),color:0xffffff,roughness:.98,side:THREE.DoubleSide});
-  const mesh=new THREE.Mesh(geo,mat);mesh.rotation.x=Math.PI/2;mesh.position.set(Number(plot.center_x)||0,1,Number(plot.center_y)||0);mesh.receiveShadow=true;
+  const mesh=new THREE.Mesh(geo,mat);mesh.rotation.x=Math.PI/2;mesh.position.set(Number(plot.center_x)||0,0.04,Number(plot.center_y)||0);mesh.receiveShadow=true;
   const g=new THREE.Group();g.add(mesh);g.add(createLandSign(plot));world3d.landGroup.add(g);world3d.landMeshes.set(id,g);
  });
 }
