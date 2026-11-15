@@ -1018,6 +1018,8 @@ function tryUnlockOrientation(){
 }
 // ========== موتور سه‌بعدی (Three.js) برای اول‌شخص و سوم‌شخص ==========
 let world3d=null;
+// مقیاس مدل: قد نهایی کاراکتر از ۳۷٫۵ واحد به ۱٫۸ متر تبدیل می‌شود.
+const PLAYER_MODEL_SCALE=1.8/37.5;
 function createPlayerMesh(colorBody="#2874bd",colorHead="#f3c6a0"){
  const g=new THREE.Group();
  const body=new THREE.Mesh(new THREE.CapsuleGeometry(7,14,4,8),new THREE.MeshStandardMaterial({color:colorBody,roughness:.7}));
@@ -1028,6 +1030,7 @@ function createPlayerMesh(colorBody="#2874bd",colorHead="#f3c6a0"){
  eyeL.position.set(-2.5,31,6.2);g.add(eyeL);
  const eyeR=eyeL.clone();eyeR.position.x=2.5;g.add(eyeR);
  g.castShadow=true;g.userData={body,head};
+ g.scale.setScalar(PLAYER_MODEL_SCALE);
  return g;
 }
 function initWorld3D(){
@@ -1037,7 +1040,7 @@ function initWorld3D(){
  const scene=new THREE.Scene();
  scene.background=new THREE.Color(0x87b8e0);
  scene.fog=new THREE.Fog(0x87b8e0,420,2200);
- const camera=new THREE.PerspectiveCamera(65,16/9,2,5000);
+ const camera=new THREE.PerspectiveCamera(65,16/9,0.1,5000);
  const renderer=new THREE.WebGLRenderer({canvas:c3,antialias:true,powerPreference:"high-performance"});
  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
  renderer.shadowMap.enabled=true;
@@ -1345,17 +1348,17 @@ function updateCamera3D(){
  world3d.localPlayer.visible=cameraMode!=="first";
  const cam=world3d.camera;
  if(cameraMode==="first"){
-  cam.position.set(px,30,pz);
-  cam.lookAt(px+fx*50,28,pz+fz*50);
+  cam.position.set(px,30*PLAYER_MODEL_SCALE,pz);
+  cam.lookAt(px+fx*50*PLAYER_MODEL_SCALE,28*PLAYER_MODEL_SCALE,pz+fz*50*PLAYER_MODEL_SCALE);
  }else{
   // سوم‌شخص نرم‌تر و کمی دورتر
-  const dist=110,height=52;
+  const dist=110*PLAYER_MODEL_SCALE,height=52*PLAYER_MODEL_SCALE;
   const tx=px-fx*dist,tz=pz-fz*dist;
   const k=0.16;
   cam.position.x+=(tx-cam.position.x)*k;
   cam.position.y+=(height-cam.position.y)*k;
   cam.position.z+=(tz-cam.position.z)*k;
-  cam.lookAt(px,24,pz);
+  cam.lookAt(px,24*PLAYER_MODEL_SCALE,pz);
  }
 }
 function resize3D(){
@@ -1396,9 +1399,9 @@ function enterImmersiveCamera(){
    world3d.localPlayer.position.set(Number(account.playerX)||0,0,Number(account.playerY)||0);
    const fx=playerFacingX,fz=playerFacingY;
    world3d.camera.position.set(
-    (Number(account.playerX)||0)-fx*95,
-    55,
-    (Number(account.playerY)||0)-fz*95
+    (Number(account.playerX)||0)-fx*95*PLAYER_MODEL_SCALE,
+    55*PLAYER_MODEL_SCALE,
+    (Number(account.playerY)||0)-fz*95*PLAYER_MODEL_SCALE
    );
   }
  }else{
