@@ -153,6 +153,16 @@ body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:n
 #roadEditActions{position:fixed;z-index:100250;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;gap:13px}
 #roadEditActions.hidden{display:none!important}
 #roadEditActions button{width:52px;height:52px;border-radius:50%;padding:0;font-size:28px;border:2px solid #fff;box-shadow:0 4px 16px #0009}
+#overheadCameraButton,#roadMoveToggle{display:none;position:fixed;right:14px;z-index:100170;background:#153b2e;color:#ffe08a;border:2px solid #ffd166;border-radius:14px;padding:10px 12px;font-weight:900;box-shadow:0 5px 18px #0008}
+#overheadCameraButton{top:max(126px,calc(env(safe-area-inset-top) + 110px))}
+#roadMoveToggle{top:max(174px,calc(env(safe-area-inset-top) + 158px))}
+#roadMoveToggle.active{background:#a34a24;color:#fff;border-color:#ffcf70}
+#overheadCameraExit{display:none;position:fixed;left:14px;top:max(12px,env(safe-area-inset-top));z-index:100180;background:#173d30;color:#fff;border:2px solid #ffd166;border-radius:12px;padding:10px 12px;font-weight:900}
+body.immersive-camera #overheadCameraButton,body.immersive-camera #roadMoveToggle{display:block}
+body.overhead-inspector #overheadCameraButton{display:none}
+body.overhead-inspector #overheadCameraExit{display:block}
+body.overhead-inspector #city3dCanvas{touch-action:none}
+body.overhead-inspector .joy-wrap{display:flex!important}
 #roadDeleteAction{background:#9b3030;color:white}#roadRotateAction{background:#d29b25;color:#201800}#roadConfirmAction{background:#208b51;color:white}
 body.immersive-camera #roadBuild3DButton{display:block}
 </style>
@@ -426,6 +436,9 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
    <div class="world" style="margin-top:10px">
     <canvas id="cityCanvas" width="560" height="390"></canvas>
     <canvas id="city3dCanvas"></canvas>
+     <button id="overheadCameraButton" type="button">🛰️ دوربین از بالا</button>
+     <button id="roadMoveToggle" type="button">🔒 جابه‌جایی آسفالت: خاموش</button>
+     <button id="overheadCameraExit" type="button">↩ بازگشت به سوم‌شخص</button>
     <button id="roadBuild3DButton" type="button">🛣️ ساخت آسفالت</button>
     <div id="roadBuildModal" class="hidden" role="dialog" aria-modal="true">
      <div class="road-build-window">
@@ -1015,6 +1028,8 @@ const CITY_HALF=4800;
 const canvas=$("cityCanvas"),ctx=canvas.getContext("2d"),joy=$("joystick"),knob=$("joyKnob");
 let moveX=0,moveY=0,joyActive=false,raf=null,lastMove=0;
 let cameraMode="top"; // top | third | first
+let overheadInspector=false,overheadZoom=420,overheadCenterX=0,overheadCenterZ=0,roadMoveEnabled=false;
+const inspectorPointers=new Map();let inspectorPinchStart=0,inspectorZoomStart=420;
 let playerFacingX=0,playerFacingY=-1;
 let lookYaw=Math.PI; // زاویه نگاه؛ پیش‌فرض رو به شمال (چاه)
 let lookPitch=-10*Math.PI/180; // زاویه پیش‌فرض قبلی؛ امکان نگاه تا ۷۰ درجه رو به بالا
@@ -1346,16 +1361,23 @@ async function deleteSelectedBusStop(){
 function makeRoadVisual(type="asphalt",orientation=0){
  const g=new THREE.Group(),mat=world3d.roadMaterials.asphalt,dashMat=world3d.roadMaterials.dash;
  const addBox=(w,l,x=0,z=0,angle=0)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,.12,l),mat);m.position.set(x,.06,z);m.rotation.y=angle;m.receiveShadow=true;m.castShadow=true;g.add(m);};
- const addDash=(w,l,x=0,z=0,angle=0)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,.025,l),dashMat);m.position.set(x,.135,z);m.rotation.y=angle;g.add(m);};
- const addArc=(cx,cz,r,start,end,width=16,steps=9)=>{const step=(end-start)/steps,segLen=Math.abs(step)*r+1.4;for(let i=0;i<steps;i++){const a=start+(i+.5)*step;addBox(width,segLen,cx+Math.cos(a)*r,cz+Math.sin(a)*r,-a);}};
+ const addDash=(w,l,x=0,z=0,angle=0)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,.035,l),dashMat);m.position.set(x,.145,z);m.rotation.y=angle;g.add(m);};
+ const addArc=(cx,cz,r,start,end,width=16,steps=12)=>{const step=(end-start)/steps,segLen=Math.abs(step)*r+1.4;for(let i=0;i<steps;i++){const a=start+(i+.5)*step;addBox(width,segLen,cx+Math.cos(a)*r,cz+Math.sin(a)*r,-a);}};
+ const dashAxis=(axis,from,to,offset=0)=>{for(let v=from+3;v<to-1;v+=9){if(axis==="z")addDash(1.05,4,offset,v);else addDash(4,1.05,v,offset);}};
+ const dashCurve=(cx,cz,r,start,end,steps=12)=>{const step=(end-start)/steps;for(let i=0;i<steps;i++){const a=start+(i+.5)*step;addDash(1.1,Math.max(2,Math.abs(step)*r*.62),cx+Math.cos(a)*r,cz+Math.sin(a)*r,-a);}};
  switch(type){
-  case "right_turn":addArc(24,-24,24,Math.PI,Math.PI/2,16,10);break;
-  case "left_turn":addArc(-24,-24,24,0,Math.PI/2,16,10);break;
-  case "three_way":addBox(16,48);addBox(24,16,12,0,Math.PI/2);break;
-  case "four_way":addBox(16,48);addBox(16,48,0,0,Math.PI/2);break;
-  case "u_turn":addArc(0,0,17,Math.PI,0,12,14);break;
-  case "roundabout":{const ring=new THREE.Mesh(new THREE.TorusGeometry(13,6,8,36),mat);ring.rotation.x=Math.PI/2;ring.position.y=.06;ring.receiveShadow=true;ring.castShadow=true;g.add(ring);addBox(12,13,0,-17);addBox(12,13,0,17);addBox(12,13,-17,0,Math.PI/2);addBox(12,13,17,0,Math.PI/2);break;}
-  case "asphalt":default:addBox(48,48);if((Number(orientation)||0)%2===0)addDash(28,3);else addDash(3,28);break;
+  case "right_turn":addArc(24,-24,24,Math.PI,Math.PI/2,16,12);dashCurve(24,-24,24,Math.PI,Math.PI/2,12);break;
+  case "left_turn":addArc(-24,-24,24,0,Math.PI/2,16,12);dashCurve(-24,-24,24,0,Math.PI/2,12);break;
+  case "three_way":addBox(16,48);addBox(24,16,12,0,Math.PI/2);dashAxis("z",-23,23);dashAxis("x",2,23);break;
+  case "four_way":addBox(16,48);addBox(16,48,0,0,Math.PI/2);dashAxis("z",-23,23);dashAxis("x",-23,23);break;
+  case "u_turn":addArc(0,0,17,Math.PI,0,12,16);dashCurve(0,0,17,Math.PI,0,16);break;
+  case "roundabout":{
+   const ring=new THREE.Mesh(new THREE.TorusGeometry(13,6,8,36),mat);ring.rotation.x=Math.PI/2;ring.position.y=.06;ring.receiveShadow=true;ring.castShadow=true;g.add(ring);
+   addBox(12,13,0,-17);addBox(12,13,0,17);addBox(12,13,-17,0,Math.PI/2);addBox(12,13,17,0,Math.PI/2);
+   const lane=new THREE.Mesh(new THREE.TorusGeometry(13,.65,5,48),dashMat);lane.rotation.x=Math.PI/2;lane.position.y=.15;g.add(lane);
+   dashAxis("z",-23,-17);dashAxis("z",17,23);dashAxis("x",-23,-17);dashAxis("x",17,23);break;
+  }
+  case "asphalt":default:addBox(48,48);if((Number(orientation)||0)%2===0)addDash(1.2,30);else addDash(30,1.2);break;
  }
  g.rotation.y=((Number(orientation)||0)%4)*Math.PI/2;g.userData.tileType=type;return g;
 }
@@ -1477,6 +1499,15 @@ function enterImmersiveCamera(){
  }
  drawCity();updateBuilderVisibility();updateGpsVisibility();
 }
+function enterOverheadInspector(){
+ if(!(isCreatorAccount()||isCurrentMayor)||!world3d||!immersiveActive)return;
+ overheadInspector=true;overheadCenterX=Number(account?.playerX)||0;overheadCenterZ=Number(account?.playerY)||0;overheadZoom=420;
+ document.body.classList.add("overhead-inspector");
+ $("cityMsg").textContent="نمای مستقیم از بالا؛ با دو انگشت زوم و با یک انگشت دوربین را جابه‌جا کن.";resize3D();
+}
+function exitOverheadInspector(){overheadInspector=false;inspectorPointers.clear();document.body.classList.remove("overhead-inspector");updateBuilderVisibility();resize3D();}
+function updateRoadMoveButton(){const b=$("roadMoveToggle");if(!b)return;b.classList.toggle("active",roadMoveEnabled);b.textContent=roadMoveEnabled?"🔓 جابه‌جایی آسفالت: روشن":"🔒 جابه‌جایی آسفالت: خاموش";}
+
 function exitImmersiveCamera(){
  if(!immersiveActive)return;
  immersiveActive=false;
@@ -2335,6 +2366,9 @@ function openOverviewMap(){
 }
 $("openMapButton").onclick=openOverviewMap;
 $("cameraModeBtn").onclick=cycleCameraMode;
+$("overheadCameraButton").onclick=enterOverheadInspector;
+$("overheadCameraExit").onclick=exitOverheadInspector;
+$("roadMoveToggle").onclick=()=>{if(!canUseRoadBuilder()||!builderToken){$("cityMsg").textContent="ابتدا ابزار ساخت را فعال کن.";return;}roadMoveEnabled=!roadMoveEnabled;updateRoadMoveButton();$("cityMsg").textContent=roadMoveEnabled?"حالت جابه‌جایی آسفالت فعال شد.":"حالت جابه‌جایی آسفالت غیرفعال شد.";};
 updateCameraModeUI();
 window.addEventListener("resize",()=>{
  if(immersiveActive){
