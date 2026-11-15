@@ -526,13 +526,20 @@ class AdminZeroResourceIn(BaseModel):
 class RoadTileIn(BaseModel):
     x: int = Field(ge=-100, le=99)
     y: int = Field(ge=-100, le=99)
-    tile_type: str = Field(default="asphalt", pattern="^(asphalt|right_turn|left_turn|three_way|four_way|u_turn|roundabout)$")
+    tile_type: str = Field(default="asphalt", pattern="^(asphalt|right_turn|left_turn|three_way|four_way)$")
     orientation: int = Field(default=0, ge=0, le=3)
 
 
 class RoadTilePositionIn(BaseModel):
     x: int = Field(ge=-100, le=99)
     y: int = Field(ge=-100, le=99)
+
+
+class RoadTileMoveIn(BaseModel):
+    from_x: int = Field(ge=-100, le=99)
+    from_y: int = Field(ge=-100, le=99)
+    to_x: int = Field(ge=-100, le=99)
+    to_y: int = Field(ge=-100, le=99)
 
 
 class MapMarkerIn(BaseModel):
@@ -1439,6 +1446,58 @@ async def rotate_road_tile(
         )
     tile = {"x": data.x, "y": data.y, "tile_type": row["tile_type"] or "asphalt", "orientation": orientation}
     await ws_send_group(player["session_server"], {"type": "road_tile", "tile": tile})
+    return {"ok": True, "tile": tile}
+
+
+@app.post("/api/roads/move")
+async def move_road_tile(
+    data: RoadTileMoveIn,
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None)
+):
+    with connect() as db:
+        player = require_road_builder(db, authorization, x_builder_token)
+        server_id = player["session_server"]
+        row = db.execute(
+            """SELECT tile_type, orientation FROM road_tiles
+            WHERE server_id=? AND tile_x=? AND tile_y=? FOR UPDATE""",
+            (server_id, data.from_x, data.from_y)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "قطعه آسفالت در محل قبلی پیدا نشد؛ نقشه را دوباره بارگذاری کن.")
+        if data.from_x == data.to_x and data.from_y == data.to_y:
+            tile = {
+                "x": data.from_x, "y": data.from_y,
+                "tile_type": row["tile_type"] or "asphalt",
+                "orientation": int(row["orientation"] or 0)
+            }
+            return {"ok": True, "tile": tile}
+        occupied = db.execute(
+            """SELECT 1 FROM road_tiles
+            WHERE server_id=? AND tile_x=? AND tile_y=?""",
+            (server_id, data.to_x, data.to_y)
+        ).fetchone()
+        if occupied:
+            raise HTTPException(409, "خانه مقصد قبلاً آسفالت دارد.")
+        result = db.execute(
+            """UPDATE road_tiles
+            SET tile_x=?, tile_y=?, updated_at=?, updated_by=?
+            WHERE server_id=? AND tile_x=? AND tile_y=?""",
+            (data.to_x, data.to_y, int(time.time()), player["id"],
+             server_id, data.from_x, data.from_y)
+        )
+        if result.rowcount != 1:
+            raise HTTPException(409, "جابه‌جایی انجام نشد؛ قطعه تغییر کرده است. دوباره تلاش کن.")
+        tile = {
+            "x": data.to_x, "y": data.to_y,
+            "tile_type": row["tile_type"] or "asphalt",
+            "orientation": int(row["orientation"] or 0)
+        }
+    await ws_send_group(server_id, {
+        "type": "road_tile_deleted",
+        "tile": {"x": data.from_x, "y": data.from_y}
+    })
+    await ws_send_group(server_id, {"type": "road_tile", "tile": tile})
     return {"ok": True, "tile": tile}
 
 
