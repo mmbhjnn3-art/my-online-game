@@ -447,6 +447,7 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
      </div>
      <div class="lg-actions">
       <button id="landGpsDialogConfirm" class="lg-primary" type="button">ذخیره تغییرات</button>
+      <button id="landPostHeightButton" class="lg-secondary" type="button" style="display:none">تنظیم ارتفاع چوب تابلو</button>
       <button id="landGpsDialogDelete" class="lg-danger" type="button">حذف زمین</button>
       <button id="landGpsDialogCancel" class="lg-secondary" type="button">بستن</button>
      </div>
@@ -973,7 +974,7 @@ const canvas=$("cityCanvas"),ctx=canvas.getContext("2d"),joy=$("joystick"),knob=
 let moveX=0,moveY=0,joyActive=false,raf=null,lastMove=0;
 let cameraMode="top"; // top | third | first
 let playerFacingX=0,playerFacingY=-1;
-let lookYaw=Math.PI; // زاویه نگاه؛ پیش‌فرض رو به شمال (چاه)
+let lookYaw=Math.PI; // زاویه نگاه؛ پیش‌فرض رو به شمال (چاه)\nlet lookPitch=0; // بالا بردن نگاه تا حداکثر ۷۰ درجه
 let cameraLerp=0.18;
 let touchLookActive=false,touchLookLastX=0,touchLookLastY=0;
 function syncFacingFromYaw(){
@@ -1374,7 +1375,8 @@ function updateCamera3D(dt=16.6){
  const cam=world3d.camera;
  if(cameraMode==="first"){
   cam.position.set(px,30*PLAYER_MODEL_SCALE,pz);
-  cam.lookAt(px+fx*50*PLAYER_MODEL_SCALE,28*PLAYER_MODEL_SCALE,pz+fz*50*PLAYER_MODEL_SCALE);
+  const cp=Math.min(Math.PI*70/180,Math.max(0,lookPitch));
+  cam.lookAt(px+fx*Math.cos(cp)*50*PLAYER_MODEL_SCALE,28*PLAYER_MODEL_SCALE+Math.sin(cp)*50*PLAYER_MODEL_SCALE,pz+fz*Math.cos(cp)*50*PLAYER_MODEL_SCALE);
  }else{
   // دوربین پشت سر با فاصله و ارتفاع متناسب با قد ۱٫۸ متری
   const dist=110*PLAYER_MODEL_SCALE,height=52*PLAYER_MODEL_SCALE;
@@ -1383,7 +1385,8 @@ function updateCamera3D(dt=16.6){
   cam.position.x+=(tx-cam.position.x)*k;
   cam.position.y+=(height-cam.position.y)*k;
   cam.position.z+=(tz-cam.position.z)*k;
-  cam.lookAt(px,24*PLAYER_MODEL_SCALE,pz);
+  const cp=Math.min(Math.PI*70/180,Math.max(0,lookPitch));
+  cam.lookAt(px+fx*Math.sin(cp)*65*PLAYER_MODEL_SCALE,24*PLAYER_MODEL_SCALE+Math.sin(cp)*65*PLAYER_MODEL_SCALE,pz+fz*Math.sin(cp)*65*PLAYER_MODEL_SCALE);
  }
 }
 function resize3D(){
@@ -1698,7 +1701,7 @@ function createLandSign(plot){
  }
  // تابلو و پایه با بزرگ شدن مساحت زمین به‌تدریج بزرگ می‌شوند.
  const signScale=Math.max(0.38,Math.min(2.4,Math.sqrt(Math.max(1,areaM2))/10));
- const postHeight=5+9*signScale;
+ const postHeight=Number(plot.post_height)>0?Math.max(1,Math.min(100,Number(plot.post_height))):(5+9*signScale);
  const post=new THREE.Mesh(new THREE.BoxGeometry(0.22*signScale,postHeight,0.22*signScale),new THREE.MeshStandardMaterial({color:0x704523}));
  post.position.y=postHeight/2;group.add(post);
  const cv=document.createElement("canvas");cv.width=512;cv.height=320;const cx=cv.getContext("2d");
@@ -1746,8 +1749,23 @@ function openLandGpsDialog({title,message,action,plot=null,showFields=false,show
  $("landGpsEditFields").style.display=showFields?"block":"none";
  $("landGpsDialogDelete").style.display=showDelete?"block":"none";
  $("landGpsDialogConfirm").textContent=confirmText;
+ $("landPostHeightButton").style.display=(plot&&isCreatorAccount()&&builderToken)?"block":"none";
  $("landGpsDialog").classList.remove("hidden");
  if(plot&&showFields){$("landGpsType").value=plot.land_type||"residential";$("landGpsPrice").value=plot.price==null?"":String(plot.price);}
+}
+async function changeLandPostHeight(){
+ const plotId=landDialogPlotId,plot=landPlots.find(p=>Number(p.id)===Number(plotId));
+ if(!plot)return;
+ const current=Number(plot.post_height)|| (5+9*Math.max(0.38,Math.min(2.4,Math.sqrt(Math.max(1,(plot.points||[]).length>=3?Math.abs((plot.points||[]).reduce((sum,p,i)=>{const q=plot.points[(i+1)%plot.points.length];return sum+Number(p[0])*Number(q[1])-Number(q[0])*Number(p[1]);},0)/2):1))/10)));
+ const raw=prompt("ارتفاع چوب تابلو به متر (۱ تا ۱۰۰):",String(current.toFixed(1)));
+ if(raw===null)return;
+ const height=Number(raw);
+ if(!Number.isFinite(height)||height<1||height>100){alert("ارتفاع باید بین ۱ تا ۱۰۰ متر باشد.");return;}
+ try{
+  const d=await roadAction("/land-plots/post-height",{plot_id:plotId,height});
+  if(d.plot)upsertLandPlot(d.plot);
+  $("landGpsDialogMessage").textContent="ارتفاع چوب تابلو ذخیره شد.";
+ }catch(e){$("landGpsDialogMessage").textContent=e.message||"ذخیره ارتفاع انجام نشد.";}
 }
 function closeLandGpsDialog(){ $("landGpsDialog").classList.add("hidden");landDialogAction=null;landDialogPlotId=null; }
 async function interactLandPlot(plotId){
@@ -2546,6 +2564,7 @@ $("gpsCloseButton").onclick=closeGpsMenu;
 $("gpsCancelButton").onclick=cancelLandPlacement;
 $("gpsFinishButton").onclick=finishLandPlacement;
 $("landGpsDialogConfirm").onclick=submitLandGpsDialog;
+$("landPostHeightButton").onclick=changeLandPostHeight;
 $("landGpsDialogDelete").onclick=deleteLandGpsPlot;
 $("landGpsDialogCancel").onclick=closeLandGpsDialog;
 $("landGpsDialog").addEventListener("click",e=>{if(e.target===$("landGpsDialog"))closeLandGpsDialog();});
