@@ -1030,8 +1030,8 @@ function tryUnlockOrientation(){
 let world3d=null;
 // مقیاس مدل: قد نهایی کاراکتر ۱٫۸ متر
 const PLAYER_MODEL_SCALE=0.048;
-// سرعت حرکت: ۲۰ کیلومتر بر ساعت (۵٫۵۵۵۶ متر بر ثانیه)
-const PLAYER_SPEED_MPS=20/3.6;
+// سرعت حرکت: ۵۰ کیلومتر بر ساعت (۱۳٫۸۸۸۹ متر بر ثانیه)
+const PLAYER_SPEED_MPS=50/3.6;
 function createPlayerMesh(colorBody="#2874bd",colorHead="#f3c6a0"){
  const g=new THREE.Group();
  const body=new THREE.Mesh(new THREE.CapsuleGeometry(7,14,4,8),new THREE.MeshStandardMaterial({color:colorBody,roughness:.7}));
@@ -1301,13 +1301,13 @@ function syncRoads3D(){
   const key=t.x+","+t.y;seen.add(key);
   if(world3d.roadMeshes.has(key))return;
   const g=new THREE.Group();
-  // ضخامت آسفالت ۱۲ سانتی‌متر
-  const mesh=new THREE.Mesh(new THREE.BoxGeometry((Number(t.orientation)||0)===1?3:48,0.12,(Number(t.orientation)||0)===1?48:3),asphaltMat);
-  mesh.position.y=0.06;mesh.receiveShadow=true;mesh.castShadow=true;g.add(mesh);
-  // خط‌کشی وسط بر اساس orientation
+  // آسفالت با پهنای ۳ متر و ضخامت ۱۲ سانتی‌متر؛ رویه فقط ۱ میلی‌متر بالاتر از زمین است.
   const orient=Number(t.orientation)||0;
-  const dash=new THREE.Mesh(new THREE.BoxGeometry(orient===1?3:28,0.025,orient===1?28:3),dashMat);
-  dash.position.y=0.135;g.add(dash);
+  const mesh=new THREE.Mesh(new THREE.BoxGeometry(orient===1?3:48,0.12,orient===1?48:3),asphaltMat);
+  mesh.position.y=-0.059;mesh.receiveShadow=true;mesh.castShadow=true;g.add(mesh);
+  // خط‌کشی وسط، نزدیک سطح آسفالت
+  const dash=new THREE.Mesh(new THREE.BoxGeometry(orient===1?3:28,0.004,orient===1?28:3),dashMat);
+  dash.position.y=0.003;g.add(dash);
   g.position.set(Number(t.x)*48+24,0,Number(t.y)*48+24);
   world3d.roadsGroup.add(g);
   world3d.roadMeshes.set(key,g);
@@ -2028,18 +2028,15 @@ function drawCity(){
   const wx=Number(t.x)*48,wy=Number(t.y)*48;
   const x=wx-left,y=wy-top;
   if(x> w || x+48<0 || y>h || y+48<0)return;
-  ctx.fillStyle="#343b3e";ctx.fillRect(x,y,48,48);
-  const has=(dx,dy)=>visibleRoads.some(v=>Number(v.x)===Number(t.x)+dx&&Number(v.y)===Number(t.y)+dy);
-  ctx.strokeStyle="#aeb5b3";ctx.lineWidth=2;ctx.beginPath();
-  if(!has(0,-1)){ctx.moveTo(x+1,y+1);ctx.lineTo(x+47,y+1);}
-  if(!has(0,1)){ctx.moveTo(x+1,y+47);ctx.lineTo(x+47,y+47);}
-  if(!has(-1,0)){ctx.moveTo(x+1,y+1);ctx.lineTo(x+1,y+47);}
-  if(!has(1,0)){ctx.moveTo(x+47,y+1);ctx.lineTo(x+47,y+47);}
-  ctx.stroke();
-  ctx.save();ctx.strokeStyle="#f0f0f0";ctx.lineWidth=2;ctx.setLineDash([7,6]);
+  // نمای دوبعدی نیز همان نوار ۳ متری را نشان می‌دهد، نه یک مربع ۴۸ متری.
+  const vertical=Number(t.orientation)===1;
+  ctx.fillStyle="#343b3e";
+  if(vertical)ctx.fillRect(x+22.5,y,3,48);
+  else ctx.fillRect(x,y+22.5,48,3);
+  ctx.save();ctx.strokeStyle="#f0f0f0";ctx.lineWidth=0.35;ctx.setLineDash([2,2]);
   ctx.beginPath();
-  if(Number(t.orientation)===1){ctx.moveTo(x+24,y+4);ctx.lineTo(x+24,y+44);}
-  else{ctx.moveTo(x+4,y+24);ctx.lineTo(x+44,y+24);}
+  if(vertical){ctx.moveTo(x+24,y+1);ctx.lineTo(x+24,y+47);}
+  else{ctx.moveTo(x+1,y+24);ctx.lineTo(x+47,y+24);}
   ctx.stroke();ctx.restore();
  });
 
