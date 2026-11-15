@@ -160,10 +160,11 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
 
 /* رفع مشکل ثبت نقطه در حالت GPS: لمس‌های بیرون پنجره باید به صحنه سه‌بعدی برسند. */
 #gpsModal.placement-active{background:transparent!important;pointer-events:none!important}
-#gpsModal.placement-active #gpsWindow{pointer-events:auto;position:fixed;top:8px;left:50%;transform:translateX(-50%);width:min(420px,calc(100vw - 20px));max-height:25vh;overflow:auto;padding:8px 12px}
-#gpsModal.placement-active #gpsTitle{font-size:15px;margin:0 0 5px}
-#gpsModal.placement-active #gpsStatus{font-size:11px;margin-top:5px}
-#gpsModal.placement-active #gpsPlacementActions{margin-top:6px}
+#gpsModal.placement-active #gpsWindow{pointer-events:auto;position:fixed;top:6px;left:50%;transform:translateX(-50%);width:min(270px,calc(100vw - 24px));max-height:16vh;min-height:0;overflow:auto;padding:5px 8px;border-width:1px;border-radius:12px}
+#gpsModal.placement-active #gpsTitle{font-size:12px;margin:0 0 3px}
+#gpsModal.placement-active #gpsStatus{font-size:9px;line-height:1.35;margin-top:3px}
+#gpsModal.placement-active #gpsPlacementActions{margin-top:4px;gap:5px}
+#gpsModal.placement-active #gpsPlacementActions button{min-height:28px;padding:4px 6px;font-size:11px}
 
 /* GPS land editor: in-game dialogs, visible draggable vertices */
 #landGpsDialog{position:fixed;inset:0;z-index:250;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(4,12,10,.72)}
@@ -1035,7 +1036,7 @@ function tryUnlockOrientation(){
 let world3d=null;
 // مقیاس مدل: قد نهایی کاراکتر ۱٫۸ متر
 const PLAYER_MODEL_SCALE=0.048;
-// سرعت حرکت: ۱۰ کیلومتر بر ساعت (۲٫۷۷۷۸ متر بر ثانیه)
+// سرعت حرکت: ۵۰ کیلومتر بر ساعت
 const PLAYER_SPEED_MPS=50/3.6;
 function createPlayerMesh(colorBody="#2874bd",colorHead="#f3c6a0"){
  const g=new THREE.Group();
@@ -1299,8 +1300,15 @@ async function deleteSelectedBusStop(){
 function syncRoads3D(){
  if(!world3d)return;
  const seen=new Set();
- const asphaltMat=new THREE.MeshStandardMaterial({color:0x343b3e,roughness:.85,metalness:.04});
- const dashMat=new THREE.MeshStandardMaterial({color:0xf5f5f0,roughness:.5,emissive:0x888888,emissiveIntensity:.1});
+ // متریال‌ها فقط یک‌بار ساخته می‌شوند؛ ساخت مجدد در هر فریم باعث فشار حافظه و پرش تصویر می‌شد.
+ if(!world3d.roadMaterials){
+  world3d.roadMaterials={
+   asphalt:new THREE.MeshStandardMaterial({color:0x343b3e,roughness:.85,metalness:.04}),
+   dash:new THREE.MeshStandardMaterial({color:0xf5f5f0,roughness:.5,emissive:0x888888,emissiveIntensity:.1})
+  };
+ }
+ const asphaltMat=world3d.roadMaterials.asphalt;
+ const dashMat=world3d.roadMaterials.dash;
  (roadTiles||[]).forEach(t=>{
   const key=t.x+","+t.y;seen.add(key);
   if(world3d.roadMeshes.has(key))return;
@@ -1348,7 +1356,7 @@ function syncOthers3D(){
   if(!seen.has(name)){world3d.othersGroup.remove(m);world3d.otherMeshes.delete(name);}
  }
 }
-function updateCamera3D(){
+function updateCamera3D(dt=16.6){
  if(!world3d||!account)return;
  if(world3d.localPlayer.userData.mayor!==!!isCurrentMayor||world3d.localPlayer.userData.playerName!==account.name){
   if(world3d.localPlayer.userData.nameTag)world3d.localPlayer.remove(world3d.localPlayer.userData.nameTag);
@@ -1371,7 +1379,7 @@ function updateCamera3D(){
   // دوربین پشت سر با فاصله و ارتفاع متناسب با قد ۱٫۸ متری
   const dist=110*PLAYER_MODEL_SCALE,height=52*PLAYER_MODEL_SCALE;
   const tx=px-fx*dist,tz=pz-fz*dist;
-  const k=0.16;
+  const k=1-Math.exp(-Math.max(0,Math.min(80,dt))/95);
   cam.position.x+=(tx-cam.position.x)*k;
   cam.position.y+=(height-cam.position.y)*k;
   cam.position.z+=(tz-cam.position.z)*k;
@@ -1388,12 +1396,13 @@ function resize3D(){
  world3d.camera.updateProjectionMatrix();
  world3d.renderer.setSize(w,h,false);
 }
-function render3D(){
+function render3D(dt=16.6){
  if(!world3d||!account)return;
+ // اطلاعات ثابت شهر فقط هنگام تغییر داده‌ها همگام می‌شوند؛ متریال جاده نیز cache شده است.
  syncRoads3D();
  syncOthers3D();
  syncLandPlots3D();
- updateCamera3D();
+ updateCamera3D(dt);
  world3d.renderer.render(world3d.scene,world3d.camera);
 }
 function enterImmersiveCamera(){
@@ -1604,7 +1613,7 @@ function makeLandMeasureSprite(text){
  ctx.fillText(text,256,65,470);
  const texture=new THREE.CanvasTexture(cv);texture.colorSpace=THREE.SRGBColorSpace;
  const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,transparent:true,depthTest:false,depthWrite:false}));
- sprite.scale.set(34,8.5,1);sprite.renderOrder=999;return sprite;
+ sprite.scale.set(8,2,1);sprite.renderOrder=999;return sprite;
 }
 function redrawLandDraft(){
  if(!world3d)return;
@@ -1631,7 +1640,7 @@ function redrawLandDraft(){
   const label=makeLandMeasureSprite("طول: "+distanceText+" متر  |  زاویه: "+angleText);
   // برچسب کنار نقطه زردِ جدید قرار می‌گیرد، نه روی وسط خط اندازه‌گیری.
   const dx=b[0]-a[0],dz=b[1]-a[1],len=Math.hypot(dx,dz)||1;
-  label.position.set((a[0]+b[0])/2,2.2,(a[1]+b[1])/2);label.scale.set(18,4.5,1);landPointGroup.add(label);
+  label.position.set((a[0]+b[0])/2,2.2,(a[1]+b[1])/2);landPointGroup.add(label);
   $("gpsStatus").textContent="نقاط: "+landPlacementPoints.length+" · طول: "+distanceText+" متر · زاویه حرکت: "+angleText+" · چپ منفی / راست مثبت · نقطه زرد آخر را جابه‌جا کن.";
  }else if(landPlacementPoints.length===1){
   $("gpsStatus").textContent="نقاط: ۱ · نقطه بعدی را برای اندازه‌گیری زاویه مشخص کن.";
