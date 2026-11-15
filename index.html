@@ -159,7 +159,7 @@ body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:n
 #roadMoveToggle.active{background:#a34a24;color:#fff;border-color:#ffcf70}
 #overheadCameraExit{display:none;position:fixed;left:14px;top:max(12px,env(safe-area-inset-top));z-index:100180;background:#173d30;color:#fff;border:2px solid #ffd166;border-radius:12px;padding:10px 12px;font-weight:900}
 body.immersive-camera #overheadCameraButton,body.immersive-camera #roadMoveToggle{display:block}
-body.overhead-inspector #overheadCameraButton{display:none}
+body.overhead-inspector #overheadCameraButton,body.overhead-inspector #roadMoveToggle{display:none!important}
 body.overhead-inspector #overheadCameraExit{display:block}
 body.overhead-inspector #city3dCanvas{touch-action:none}
 body.overhead-inspector .joy-wrap{display:flex!important}
@@ -1415,6 +1415,7 @@ function syncOthers3D(){
   if(!seen.has(name)){world3d.othersGroup.remove(m);world3d.otherMeshes.delete(name);}
  }
 }
+function camUpRestore3D(){if(world3d&&world3d.camera)world3d.camera.up.set(0,1,0);}
 function updateCamera3D(dt=16.6){
  if(!world3d||!account)return;
  if(world3d.localPlayer.userData.mayor!==!!isCurrentMayor||world3d.localPlayer.userData.playerName!==account.name){
@@ -1423,8 +1424,17 @@ function updateCamera3D(dt=16.6){
   world3d.localPlayer.add(world3d.localPlayer.userData.nameTag);
   world3d.localPlayer.userData.mayor=!!isCurrentMayor;world3d.localPlayer.userData.playerName=account.name;
  }
- syncFacingFromYaw();
  const px=Number(account.playerX)||0,pz=Number(account.playerY)||0;
+ // نمای بازرسی از بالا؛ دوربین عمودی است و کاراکتر ثابت می‌ماند.
+ if(overheadInspector){
+  const cam=world3d.camera;
+  cam.up.set(0,0,-1);
+  cam.position.set(overheadCenterX,overheadZoom,overheadCenterZ);
+  cam.lookAt(overheadCenterX,0,overheadCenterZ);
+  return;
+ }
+ camUpRestore3D();
+ syncFacingFromYaw();
  const fx=playerFacingX,fz=playerFacingY;
  // کاراکتر رو به جهت نگاه
  world3d.localPlayer.position.set(px,0,pz);
@@ -1501,11 +1511,13 @@ function enterImmersiveCamera(){
 }
 function enterOverheadInspector(){
  if(!(isCreatorAccount()||isCurrentMayor)||!world3d||!immersiveActive)return;
- overheadInspector=true;overheadCenterX=Number(account?.playerX)||0;overheadCenterZ=Number(account?.playerY)||0;overheadZoom=420;
+ overheadInspector=true;moveX=0;moveY=0;joyActive=false;touchLookActive=false;roadDragActive=false;inspectorPointers.clear();
+ overheadCenterX=Number(account?.playerX)||0;overheadCenterZ=Number(account?.playerY)||0;overheadZoom=420;
+ if(world3d&&world3d.camera){world3d.camera.up.set(0,0,-1);world3d.camera.position.set(overheadCenterX,overheadZoom,overheadCenterZ);world3d.camera.lookAt(overheadCenterX,0,overheadCenterZ);}
  document.body.classList.add("overhead-inspector");
  $("cityMsg").textContent="نمای مستقیم از بالا؛ با دو انگشت زوم و با یک انگشت دوربین را جابه‌جا کن.";resize3D();
 }
-function exitOverheadInspector(){overheadInspector=false;inspectorPointers.clear();document.body.classList.remove("overhead-inspector");updateBuilderVisibility();resize3D();}
+function exitOverheadInspector(){overheadInspector=false;inspectorPointers.clear();document.body.classList.remove("overhead-inspector");camUpRestore3D();moveX=0;moveY=0;stopJoystick();updateBuilderVisibility();resize3D();render3D();}
 function updateRoadMoveButton(){const b=$("roadMoveToggle");if(!b)return;b.classList.toggle("active",roadMoveEnabled);b.textContent=roadMoveEnabled?"🔓 جابه‌جایی آسفالت: روشن":"🔒 جابه‌جایی آسفالت: خاموش";}
 
 function exitImmersiveCamera(){
@@ -1604,6 +1616,9 @@ function updateBuilderVisibility(){
  if(!controls)return;
  const allowed=canUseRoadBuilder();
  controls.classList.toggle("hidden",!allowed);
+ const overheadBtn=$("overheadCameraButton"),roadMoveBtn=$("roadMoveToggle");
+ if(overheadBtn)overheadBtn.style.display=((isCreatorAccount()||isCurrentMayor)&&cameraMode==="third"&&immersiveActive&&!overheadInspector)?"block":"none";
+ if(roadMoveBtn)roadMoveBtn.style.display=(allowed&&cameraMode==="third"&&immersiveActive&&!overheadInspector)?"block":"none";
  $("adminManagementSection").classList.toggle("hidden",!isCreatorAccount());
  $("updateManagementSection").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  $("mapAddMarkerButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
@@ -1845,7 +1860,7 @@ function roadHit(clientX,clientY){
  world3d.pointer.set(((clientX-r.left)/r.width)*2-1,-((clientY-r.top)/r.height)*2+1);world3d.raycaster.setFromCamera(world3d.pointer,world3d.camera);
  for(const hit of world3d.raycaster.intersectObject(world3d.roadsGroup,true)){let node=hit.object;while(node.parent&&node.parent!==world3d.roadsGroup)node=node.parent;if(node.userData&&node.userData.roadKey)return node;}return null;
 }
-function showRoadActions(){const el=$("roadEditActions");if(el){el.classList.remove("hidden");updateRoadActionsPosition();}}
+function showRoadActions(){const el=$("roadEditActions");if(el){if(!pendingRoad&&!roadMoveEnabled){el.classList.add("hidden");return;}el.classList.remove("hidden");updateRoadActionsPosition();}}
 function hideRoadActions(){const el=$("roadEditActions");if(el)el.classList.add("hidden");pendingRoad=null;editingRoadKey=null;roadDragOriginal=null;roadDragMoved=false;}
 function updateRoadActionsPosition(){
  const el=$("roadEditActions");if(!el||el.classList.contains("hidden")||!world3d)return;const mesh=pendingRoad?.mesh||roadDragOriginal?.mesh;if(!mesh)return;
@@ -2368,7 +2383,16 @@ $("openMapButton").onclick=openOverviewMap;
 $("cameraModeBtn").onclick=cycleCameraMode;
 $("overheadCameraButton").onclick=enterOverheadInspector;
 $("overheadCameraExit").onclick=exitOverheadInspector;
-$("roadMoveToggle").onclick=()=>{if(!canUseRoadBuilder()||!builderToken){$("cityMsg").textContent="ابتدا ابزار ساخت را فعال کن.";return;}roadMoveEnabled=!roadMoveEnabled;updateRoadMoveButton();$("cityMsg").textContent=roadMoveEnabled?"حالت جابه‌جایی آسفالت فعال شد.":"حالت جابه‌جایی آسفالت غیرفعال شد.";};
+$("roadMoveToggle").onclick=()=>{
+ if(!canUseRoadBuilder()||!builderToken){$("cityMsg").textContent="ابتدا ابزار ساخت را فعال کن.";return;}
+ roadMoveEnabled=!roadMoveEnabled;
+ if(!roadMoveEnabled&&roadDragOriginal){
+  if(roadDragOriginal.mesh&&roadDragOriginal.position)roadDragOriginal.mesh.position.copy(roadDragOriginal.position);
+  roadDragOriginal=null;roadDragActive=false;roadDragMoved=false;editingRoadKey=null;hideRoadActions();
+ }
+ updateRoadMoveButton();
+ $("cityMsg").textContent=roadMoveEnabled?"حالت جابه‌جایی آسفالت‌های تأییدشده فعال شد.":"آسفالت‌های تأییدشده قفل شدند و قابل جابه‌جایی نیستند.";
+};
 updateCameraModeUI();
 window.addEventListener("resize",()=>{
  if(immersiveActive){
@@ -2483,6 +2507,7 @@ mapCanvas.addEventListener("pointerdown",async e=>{
 function movePlayer(){
  if(!account)return;
  const now=Date.now(),dt=Math.min(40,now-(lastMove||now));lastMove=now;
+ if(overheadInspector){moveX=0;moveY=0;joyActive=false;render3D();raf=requestAnimationFrame(movePlayer);return;}
  if(waterGuidePhase==="walk"){
   const dx=0-(Number(account.playerX)||0),dy=-145-(Number(account.playerY)||0),distance=Math.hypot(dx,dy);
   if(distance<=31){moveX=0;moveY=0;waterGuidePhase="clickWell";showWaterGuideHint("به چاه آب رسیدی! حالا روی خود چاه آب کلیک کن.");}
@@ -2527,8 +2552,8 @@ function setJoystick(e){
  moveX=dx/max;moveY=dy/max;
 }
 function stopJoystick(){joyActive=false;moveX=0;moveY=0;knob.style.left="37px";knob.style.top="37px";save()}
-joy.addEventListener("pointerdown",e=>{joyActive=true;joy.setPointerCapture(e.pointerId);setJoystick(e)});
-joy.addEventListener("pointermove",e=>{if(joyActive)setJoystick(e)});
+joy.addEventListener("pointerdown",e=>{if(overheadInspector){moveX=0;moveY=0;return;}joyActive=true;joy.setPointerCapture(e.pointerId);setJoystick(e)});
+joy.addEventListener("pointermove",e=>{if(overheadInspector){moveX=0;moveY=0;return;}if(joyActive)setJoystick(e)});
 joy.addEventListener("pointerup",stopJoystick);joy.addEventListener("pointercancel",stopJoystick);
 canvas.addEventListener("pointerdown",e=>{
  canvas.setPointerCapture(e.pointerId);
@@ -2563,6 +2588,12 @@ let touchLookMoved=false;
 if(c3el){
  c3el.addEventListener("pointerdown",async e=>{
   if(!immersiveActive||!account)return;
+  if(overheadInspector){
+   e.preventDefault();c3el.setPointerCapture(e.pointerId);
+   inspectorPointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+   if(inspectorPointers.size===2){const pts=[...inspectorPointers.values()];inspectorPinchStart=Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y);inspectorZoomStart=overheadZoom;}
+   moveX=0;moveY=0;joyActive=false;return;
+  }
   c3el.setPointerCapture(e.pointerId);
   touchLookMoved=false;
   if(builderToken&&cameraMode==="third"&&roadPlacementActive){
@@ -2570,7 +2601,7 @@ if(c3el){
    if(point&&Math.abs(point.x)<=CITY_HALF&&Math.abs(point.z)<=CITY_HALF){setPendingRoad(point);roadPlacementActive=false;roadDragActive=true;touchLookActive=false;return;}
    return;
   }
-  if(builderToken&&cameraMode==="third"){
+  if(builderToken&&roadMoveEnabled&&cameraMode==="third"){
    const hit=roadHit(e.clientX,e.clientY);
    if(hit&&!pendingRoad){
     const key=hit.userData.roadKey;
@@ -2615,6 +2646,18 @@ if(c3el){
   touchLookLastY=e.clientY;
  });
  c3el.addEventListener("pointermove",e=>{
+  if(overheadInspector&&inspectorPointers.has(e.pointerId)){
+   e.preventDefault();const previous=inspectorPointers.get(e.pointerId);
+   inspectorPointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+   if(inspectorPointers.size>=2){
+    const pts=[...inspectorPointers.values()],distance=Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y);
+    if(inspectorPinchStart>0)overheadZoom=Math.max(90,Math.min(1800,inspectorZoomStart*inspectorPinchStart/Math.max(1,distance)));
+   }else{
+    const scale=overheadZoom/Math.max(180,c3el.clientHeight);
+    overheadCenterX-=(e.clientX-previous.x)*scale;overheadCenterZ+=(e.clientY-previous.y)*scale;
+   }
+   render3D();return;
+  }
   if(roadDragActive&&pendingRoad){const point=getGroundPoint(e.clientX,e.clientY);if(point&&Math.abs(point.x)<=CITY_HALF&&Math.abs(point.z)<=CITY_HALF){const c=roadCellAt(point);pendingRoad.x=c.x;pendingRoad.y=c.y;pendingRoad.mesh.position.set(c.x*48+24,0,c.y*48+24);}return;}
   if(roadDragActive&&roadDragOriginal){const point=getGroundPoint(e.clientX,e.clientY);if(point&&Math.abs(point.x)<=CITY_HALF&&Math.abs(point.z)<=CITY_HALF){const c=roadCellAt(point);if(Math.abs(c.x*48+24-roadDragOriginal.position.x)+Math.abs(c.y*48+24-roadDragOriginal.position.z)>2)roadDragMoved=true;roadDragOriginal.mesh.position.set(c.x*48+24,0,c.y*48+24);roadDragOriginal.target={x:c.x,y:c.y};}return;}
   if(landDraggingLastPoint){const point=getGroundPoint(e.clientX,e.clientY);if(point)moveLastLandPlacementPoint(point);return;}
@@ -2629,6 +2672,9 @@ if(c3el){
   syncFacingFromYaw();
  });
  c3el.addEventListener("pointerup",e=>{
+  if(overheadInspector&&inspectorPointers.has(e.pointerId)){
+   inspectorPointers.delete(e.pointerId);if(inspectorPointers.size<2){inspectorPinchStart=0;inspectorZoomStart=overheadZoom;}return;
+  }
   if(roadDragActive){roadDragActive=false;if(roadDragOriginal&&!pendingRoad&&!roadDragMoved){const q=roadDragOriginal.key.split(",").map(Number);roadDragOriginal.target={x:q[0],y:q[1]};}touchLookActive=false;touchLookMoved=false;showRoadActions();return;}
   if(busStopPlacementActive){touchLookActive=false;touchLookMoved=false;return;}
   if(landDraggingLastPoint){landDraggingLastPoint=false;touchLookActive=false;touchLookMoved=false;return;}
@@ -2636,7 +2682,7 @@ if(c3el){
   if(immersiveActive&&!touchLookMoved&&hitWell3D(e.clientX,e.clientY))tryOpenWellFrom3D();
   touchLookActive=false;touchLookMoved=false;save();
  });
- c3el.addEventListener("pointercancel",()=>{landDraggingLastPoint=false;touchLookActive=false;touchLookMoved=false;});
+ c3el.addEventListener("pointercancel",e=>{inspectorPointers.delete(e.pointerId);if(inspectorPointers.size<2)inspectorPinchStart=0;landDraggingLastPoint=false;touchLookActive=false;touchLookMoved=false;});
 }
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"){moveX=0;moveY=0;pauseGameClock();}else if(account && !$("game").classList.contains("hidden")){resumeGameClock();}});
 
