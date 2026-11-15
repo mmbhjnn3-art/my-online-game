@@ -138,6 +138,20 @@ body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:n
 .notification-item time{display:block;color:#b7c9bf;font-size:10px;margin-top:5px}
 #notificationsEmpty{text-align:center;color:#b7c9bf;padding:20px 5px}
 .water-guide-hint{position:fixed;z-index:120;top:12px;left:12px;right:12px;max-width:560px;margin:auto;background:linear-gradient(135deg,#18254d,#243d70);color:#fff;border:2px solid #ffd34e;border-radius:15px;padding:13px 15px;box-shadow:0 8px 28px #0008;display:flex;align-items:center;gap:12px;font-weight:bold;line-height:1.8}.water-guide-hint span{flex:1}.water-guide-hint button{flex:0 0 auto;background:#fff;color:#17234a;border:0;border-radius:9px;padding:8px 13px;font-weight:bold}
+
+#roadBuild3DButton{display:none;position:fixed;right:14px;top:max(72px,env(safe-area-inset-top));z-index:100140;background:#153b2e;color:#ffe08a;border:2px solid #ffd166;border-radius:14px;padding:11px 14px;font-weight:900;box-shadow:0 5px 18px #0008}
+#roadBuildModal{position:fixed;inset:0;z-index:100300;background:#000c;display:flex;align-items:center;justify-content:center;padding:14px}
+#roadBuildModal.hidden{display:none!important}
+.road-build-window{width:min(100%,420px);background:linear-gradient(145deg,#21483b,#10271f);border:2px solid #ffd166;border-radius:18px;padding:15px;max-height:85vh;overflow:auto}
+.road-build-window h2{text-align:center}
+.road-type-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.road-type-grid button{background:#19372e;border:1px solid #668875;color:white;display:flex;flex-direction:column;align-items:center;gap:5px;min-height:90px}
+.road-preview{display:grid;place-items:center;width:100%;height:44px;background:#343b3e;border-radius:8px;color:#fff;font-size:34px;line-height:1}
+#roadEditActions{position:fixed;z-index:100250;left:50%;bottom:max(105px,calc(env(safe-area-inset-bottom) + 95px));transform:translateX(-50%);display:flex;gap:13px}
+#roadEditActions.hidden{display:none!important}
+#roadEditActions button{width:52px;height:52px;border-radius:50%;padding:0;font-size:28px;border:2px solid #fff;box-shadow:0 4px 16px #0009}
+#roadDeleteAction{background:#9b3030;color:white}#roadRotateAction{background:#d29b25;color:#201800}#roadConfirmAction{background:#208b51;color:white}
+body.immersive-camera #roadBuild3DButton{display:block}
 </style>
 
 <style id="hide-obsolete-push-controls">
@@ -378,8 +392,7 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
    <div id="builderControls" class="hidden" style="margin:10px 0;padding:10px;background:#10271f;border:1px solid #d4ad4c;border-radius:12px">
     <div class="row">
      <button id="builderButton" class="secondary" type="button">ساخت</button>
-     <button id="asphaltToolButton" class="secondary hidden" type="button">🛣️ آسفالت</button>
-     <button id="rotateRoadButton" class="secondary hidden" type="button">↻ چرخاندن آسفالت</button>
+
      <button id="busStopToolButton" class="secondary hidden" type="button">🚏 ایستگاه اتوبوس</button>
     </div>
     <div id="builderHint" class="notice">ابزار ساخت فقط برای حساب سازنده بازی فعال است.</div>
@@ -410,6 +423,28 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
    <div class="world" style="margin-top:10px">
     <canvas id="cityCanvas" width="560" height="390"></canvas>
     <canvas id="city3dCanvas"></canvas>
+    <button id="roadBuild3DButton" type="button">🛣️ ساخت آسفالت</button>
+    <div id="roadBuildModal" class="hidden" role="dialog" aria-modal="true">
+     <div class="road-build-window">
+      <h2>انتخاب نوع آسفالت</h2>
+      <div class="road-type-grid">
+       <button type="button" data-road-type="asphalt"><span class="road-preview road-straight">━</span>آسفالت عادی</button>
+       <button type="button" data-road-type="right_turn"><span class="road-preview">↱</span>پیچ گرد راست</button>
+       <button type="button" data-road-type="left_turn"><span class="road-preview">↰</span>پیچ گرد چپ</button>
+       <button type="button" data-road-type="three_way"><span class="road-preview">┳</span>سه‌راهی</button>
+       <button type="button" data-road-type="four_way"><span class="road-preview">╋</span>چهارراهی</button>
+       <button type="button" data-road-type="u_turn"><span class="road-preview">↶</span>دوربرگردان ۱۸۰°</button>
+       <button type="button" data-road-type="roundabout"><span class="road-preview">◉</span>میدان</button>
+      </div>
+      <button type="button" id="roadBuildClose" class="secondary full">بستن</button>
+     </div>
+    </div>
+    <div id="roadEditActions" class="hidden">
+     <button type="button" id="roadDeleteAction" aria-label="حذف">×</button>
+     <button type="button" id="roadRotateAction" aria-label="چرخش">↻</button>
+     <button type="button" id="roadConfirmAction" aria-label="تأیید">✓</button>
+    </div>
+
    </div>
    <button id="gpsButton" type="button">📍 GPS</button>
    <div id="gpsModal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="gpsTitle">
@@ -1306,29 +1341,22 @@ async function deleteSelectedBusStop(){
 function syncRoads3D(){
  if(!world3d)return;
  const seen=new Set();
- // متریال‌ها فقط یک‌بار ساخته می‌شوند؛ ساخت مجدد در هر فریم باعث فشار حافظه و پرش تصویر می‌شد.
  if(!world3d.roadMaterials){
   world3d.roadMaterials={
    asphalt:new THREE.MeshStandardMaterial({color:0x343b3e,roughness:.85,metalness:.04}),
    dash:new THREE.MeshStandardMaterial({color:0xf5f5f0,roughness:.5,emissive:0x888888,emissiveIntensity:.1})
   };
  }
- const asphaltMat=world3d.roadMaterials.asphalt;
- const dashMat=world3d.roadMaterials.dash;
  (roadTiles||[]).forEach(t=>{
-  const key=t.x+","+t.y;seen.add(key);
-  if(world3d.roadMeshes.has(key))return;
-  const g=new THREE.Group();
-  // ضخامت آسفالت ۱۲ سانتی‌متر
-  const mesh=new THREE.Mesh(new THREE.BoxGeometry(48,0.12,48),asphaltMat);
-  mesh.position.y=0.06;mesh.receiveShadow=true;mesh.castShadow=true;g.add(mesh);
-  // خط‌کشی وسط بر اساس orientation
-  const orient=Number(t.orientation)||0;
-  const dash=new THREE.Mesh(new THREE.BoxGeometry(orient===1?3:28,0.025,orient===1?28:3),dashMat);
-  dash.position.y=0.135;g.add(dash);
+  const key=Number(t.x)+","+Number(t.y);seen.add(key);
+  const signature=(t.tile_type||"asphalt")+":"+(Number(t.orientation)||0);
+  let g=world3d.roadMeshes.get(key);
+  if(g&&g.userData.signature===signature)return;
+  if(g)world3d.roadsGroup.remove(g);
+  g=makeRoadVisual(t.tile_type||"asphalt",Number(t.orientation)||0);
   g.position.set(Number(t.x)*48+24,0,Number(t.y)*48+24);
-  world3d.roadsGroup.add(g);
-  world3d.roadMeshes.set(key,g);
+  g.userData.roadKey=key;g.userData.signature=signature;
+  world3d.roadsGroup.add(g);world3d.roadMeshes.set(key,g);
  });
  for(const [key,mesh] of world3d.roadMeshes){
   if(!seen.has(key)){world3d.roadsGroup.remove(mesh);world3d.roadMeshes.delete(key);}
@@ -1546,7 +1574,9 @@ function updateBuilderVisibility(){
  $("mapAddMarkerButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  $("busStopToolButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  $("busStop3DButton").style.display=(isCreatorAccount()&&cameraMode==="third"&&immersiveActive)?"block":"none";
- if(!allowed){$("mapAddMarkerButton").classList.add("hidden");$("busStopToolButton").classList.add("hidden");builderToken=null;builderMode=false;rotateRoadMode=false;$("asphaltToolButton").classList.add("hidden");$("rotateRoadButton").classList.add("hidden");$("adminPlayersPanel").classList.add("hidden");$("adminPlayersButton").disabled=true;}
+ const roadBtn=$("roadBuild3DButton");
+ if(roadBtn)roadBtn.style.display=(allowed&&builderToken&&cameraMode==="third"&&immersiveActive)?"block":"none";
+ if(!allowed){$("mapAddMarkerButton").classList.add("hidden");$("busStopToolButton").classList.add("hidden");builderToken=null;builderMode=false;rotateRoadMode=false;$("adminPlayersPanel").classList.add("hidden");$("adminPlayersButton").disabled=true;}
 }
 function updateGpsVisibility(){
  const b=$("gpsButton");if(!b)return;
@@ -1561,8 +1591,8 @@ async function ensureCreatorBuildUnlocked(){
  if(pass.length<4){alert("رمز باید حداقل ۴ نویسه داشته باشد.");return false;}
  try{
   const d=await api("/builder/unlock",{password:pass});
-  builderToken=d.builder_token;builderMode=true;rotateRoadMode=false;updateBuilderVisibility();
-  $("asphaltToolButton").classList.remove("hidden");$("rotateRoadButton").classList.remove("hidden");
+  builderToken=d.builder_token;builderMode=false;rotateRoadMode=false;updateBuilderVisibility();
+  
   $("adminPlayersButton").disabled=false;
   return true;
  }catch(e){alert(e.message||"رمز ساخت درست نیست.");return false;}
@@ -1888,48 +1918,6 @@ async function roadAction(path,body,options={}){
  }
  throw lastError||new Error("عملیات آسفالت انجام نشد.");
 }
-async function placeRoadTileAt(worldX,worldY){
- if(!builderToken||!builderMode)return;
- const tx=Math.floor(worldX/48),ty=Math.floor(worldY/48);
- if(tx < -100 || tx > 99 || ty < -100 || ty > 99){$("cityMsg").textContent="بیرون از محدوده شهر نمی‌توان آسفالت گذاشت.";return;}
- const existing=roadTiles.find(v=>v.x===tx&&v.y===ty);
- try{
-  if(existing){
-   if(rotateRoadMode){
-    const d=await roadAction("/roads/rotate",{x:tx,y:ty});
-    const idx=roadTiles.findIndex(v=>v.x===tx&&v.y===ty);if(idx>=0)roadTiles[idx]=d.tile;
-    $("cityMsg").textContent="جهت آسفالت چرخانده شد.";
-   }else if(confirm("می‌خواهی این آسفالت حذف شود؟")){
-    await roadAction("/roads/delete",{x:tx,y:ty});
-    roadTiles=roadTiles.filter(v=>!(v.x===tx&&v.y===ty));
-    $("cityMsg").textContent="آسفالت حذف شد.";
-   }
-   drawCity();return;
-  }
-  if(rotateRoadMode){$("cityMsg").textContent="برای چرخاندن، روی یک آسفالت موجود بزن.";return;}
-  const d=await roadAction("/roads",{x:tx,y:ty,tile_type:"asphalt",orientation:0},{retryable:true});
-  const t=d.tile||{x:tx,y:ty,tile_type:"asphalt",orientation:0};
-  const idx=roadTiles.findIndex(v=>v.x===tx&&v.y===ty);
-  if(idx>=0)roadTiles[idx]=t;else roadTiles.push(t);
-  drawCity();drawOverviewMap();
-  $("cityMsg").textContent="یک خانه آسفالت شد و برای همه بازیکنان این سرور ذخیره شد.";
- }catch(e){
-  const message=String(e.message||e);
-  // ممکن است دیتابیس عملیات را ثبت کرده باشد اما پاسخ شبکه به گوشی نرسیده باشد.
-  // وضعیت نهایی را از سرور می‌خوانیم؛ درخواست rotate هرگز کورکورانه تکرار نمی‌شود.
-  try{
-   const d=await api("/roads");
-   roadTiles=Array.isArray(d.tiles)?d.tiles.map(t=>({x:Number(t.x),y:Number(t.y),tile_type:t.tile_type||"asphalt",orientation:Number(t.orientation)||0})):[];
-   drawCity();drawOverviewMap();
-   const current=roadTiles.find(v=>v.x===tx&&v.y===ty);
-   if((!current&&existing&&!rotateRoadMode)||(current&&(!existing||current.orientation!==existing.orientation))){
-    $("cityMsg").textContent="تغییر آسفالت روی سرور ثبت شد و نقشه به‌روز شد.";return;
-   }
-  }catch(_){scheduleRealtimeReconnect();}
-  $("cityMsg").textContent=message;
-  if(message.includes("دسترسی ساخت معتبر")||message.includes("ابتدا رمز ساخت")){builderToken=null;builderMode=false;$("asphaltToolButton").classList.add("hidden");$("rotateRoadButton").classList.add("hidden");}
- }
-}
 $("builderButton").onclick=async()=>{
  if(!canUseRoadBuilder())return;
  let pass="";
@@ -1940,12 +1928,12 @@ $("builderButton").onclick=async()=>{
  }
  try{
   const d=await api("/builder/unlock",{password:pass});
-  builderToken=d.builder_token;builderMode=true;rotateRoadMode=false;updateBuilderVisibility();
-  $("asphaltToolButton").classList.remove("hidden");$("rotateRoadButton").classList.remove("hidden");
+  builderToken=d.builder_token;builderMode=false;rotateRoadMode=false;updateBuilderVisibility();
+  
   if(isCreatorAccount()){$("adminPlayersButton").disabled=false;$("mapAddMarkerButton").classList.remove("hidden");}
   $("builderHint").textContent=isCreatorAccount()?"حالت آسفالت فعال است. روی خانه خالی بزن تا بسازی؛ روی آسفالت بزن تا حذف کنی.":"دسترسی ساخت آسفالت در این سرور فعال شد؛ ساخت، چرخاندن و حذف آسفالت مجاز است.";
   $("cityMsg").textContent=isCreatorAccount()?(d.first_setup?"رمز ساخت برای اولین بار ذخیره شد؛ ابزار ساخت فعال است.":"رمز درست است؛ ابزار ساخت فعال شد."):"ابزار ساخت آسفالت در سرور شما فعال شد.";
- }catch(e){builderToken=null;builderMode=false;$("asphaltToolButton").classList.add("hidden");$("rotateRoadButton").classList.add("hidden");$("adminPlayersButton").disabled=true;$("cityMsg").textContent=e.message;alert(e.message);}
+ }catch(e){builderToken=null;builderMode=false;$("adminPlayersButton").disabled=true;$("cityMsg").textContent=e.message;alert(e.message);}
 };
 function escapeAdminText(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 async function loadAdminPlayers(){
@@ -2045,17 +2033,6 @@ $("adminPlayersList").addEventListener("click",async e=>{
  try{await api(`/admin/players/${id}/delete`,{}, {"X-Builder-Token":builderToken});adminPlayersCache=adminPlayersCache.filter(x=>Number(x.id)!==id);renderAdminPlayers();}
  catch(err){alert(err.message);btn.disabled=false;}
 });
-
-$("asphaltToolButton").onclick=()=>{
- if(!builderToken)return;
- builderMode=!builderMode;rotateRoadMode=false;
- $("builderHint").textContent=builderMode?"حالت آسفالت فعال است؛ خانه خالی = ساخت، آسفالت موجود = حذف با تأیید.":"حالت ساخت خاموش است.";
-};
-$("rotateRoadButton").onclick=()=>{
- if(!builderToken)return;
- builderMode=true;rotateRoadMode=!rotateRoadMode;
- $("builderHint").textContent=rotateRoadMode?"حالت چرخاندن فعال است؛ روی آسفالت موردنظر بزن.":"حالت آسفالت فعال است؛ روی آسفالت بزن تا حذف شود.";
-};
 
 function drawCity(){
  if(!account||!ctx)return;
@@ -2509,6 +2486,18 @@ if(c3el){
   if(!immersiveActive||!account)return;
   c3el.setPointerCapture(e.pointerId);
   touchLookMoved=false;
+  if(builderToken&&cameraMode==="third"&&roadPlacementActive){
+   const point=getGroundPoint(e.clientX,e.clientY);
+   if(point&&Math.abs(point.x)<=CITY_HALF&&Math.abs(point.z)<=CITY_HALF){setPendingRoad(point);roadPlacementActive=false;roadDragActive=true;touchLookActive=false;return;}
+   return;
+  }
+  if(builderToken&&cameraMode==="third"){
+   const hit=roadHit(e.clientX,e.clientY);
+   if(hit&&!pendingRoad){
+    const key=hit.userData.roadKey;
+    if(key){editingRoadKey=key;showRoadActions();roadDragActive=true;roadDragMoved=false;roadDragOriginal={key,mesh:hit,position:hit.position.clone()};touchLookActive=false;return;}
+   }
+  }
   if(busStopPlacementActive){
    const point=getGroundPoint(e.clientX,e.clientY);
    if(point&&Math.abs(point.x)<=CITY_HALF&&Math.abs(point.z)<=CITY_HALF){
@@ -2547,6 +2536,8 @@ if(c3el){
   touchLookLastY=e.clientY;
  });
  c3el.addEventListener("pointermove",e=>{
+  if(roadDragActive&&pendingRoad){const point=getGroundPoint(e.clientX,e.clientY);if(point&&Math.abs(point.x)<=CITY_HALF&&Math.abs(point.z)<=CITY_HALF){const c=roadCellAt(point);pendingRoad.x=c.x;pendingRoad.y=c.y;pendingRoad.mesh.position.set(c.x*48+24,0,c.y*48+24);}return;}
+  if(roadDragActive&&roadDragOriginal){const point=getGroundPoint(e.clientX,e.clientY);if(point&&Math.abs(point.x)<=CITY_HALF&&Math.abs(point.z)<=CITY_HALF){const c=roadCellAt(point);if(Math.abs(c.x*48+24-roadDragOriginal.position.x)+Math.abs(c.y*48+24-roadDragOriginal.position.z)>2)roadDragMoved=true;roadDragOriginal.mesh.position.set(c.x*48+24,0,c.y*48+24);roadDragOriginal.target={x:c.x,y:c.y};}return;}
   if(landDraggingLastPoint){const point=getGroundPoint(e.clientX,e.clientY);if(point)moveLastLandPlacementPoint(point);return;}
   if(!immersiveActive||!touchLookActive||!c3el.hasPointerCapture(e.pointerId))return;
   const dx=e.clientX-touchLookLastX;
@@ -2559,6 +2550,22 @@ if(c3el){
   syncFacingFromYaw();
  });
  c3el.addEventListener("pointerup",e=>{
+  if(roadDragActive){
+   roadDragActive=false;
+   if(roadDragOriginal&&roadDragMoved&&roadDragOriginal.target){
+    const old=roadDragOriginal.key.split(",").map(Number),target=roadDragOriginal.target;
+    const original=roadTiles.find(t=>Number(t.x)===old[0]&&Number(t.y)===old[1]);
+    (async()=>{try{
+     if(target.x===old[0]&&target.y===old[1])return;
+     await roadAction("/roads/delete",{x:old[0],y:old[1]});
+     const d=await roadAction("/roads",{x:target.x,y:target.y,tile_type:original?.tile_type||"asphalt",orientation:Number(original?.orientation)||0},{retryable:true});
+     roadTiles=roadTiles.filter(t=>!(Number(t.x)===old[0]&&Number(t.y)===old[1]));
+     roadTiles.push(d.tile||{x:target.x,y:target.y,tile_type:original?.tile_type||"asphalt",orientation:Number(original?.orientation)||0});
+     syncRoads3D();hideRoadActions();
+    }catch(err){roadDragOriginal.mesh.position.copy(roadDragOriginal.position);$("cityMsg").textContent=err.message||"جابه‌جایی آسفالت انجام نشد.";}finally{roadDragOriginal=null;roadDragMoved=false;}})();
+   }else{roadDragOriginal=null;roadDragMoved=false;}
+   return;
+  }
   if(busStopPlacementActive){touchLookActive=false;touchLookMoved=false;return;}
   if(landDraggingLastPoint){landDraggingLastPoint=false;touchLookActive=false;touchLookMoved=false;return;}
   if(landPlacementType){touchLookActive=false;touchLookMoved=false;return;}
