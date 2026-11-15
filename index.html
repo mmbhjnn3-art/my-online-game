@@ -2654,7 +2654,7 @@ if(c3el){
     if(inspectorPinchStart>0)overheadZoom=Math.max(90,Math.min(1800,inspectorZoomStart*inspectorPinchStart/Math.max(1,distance)));
    }else{
     const scale=overheadZoom/Math.max(180,c3el.clientHeight);
-    overheadCenterX-=(e.clientX-previous.x)*scale;overheadCenterZ+=(e.clientY-previous.y)*scale;
+    overheadCenterX+=(e.clientX-previous.x)*scale;overheadCenterZ+=(e.clientY-previous.y)*scale;
    }
    render3D();return;
   }
