@@ -491,7 +491,13 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
    <p class="notice">از اینجا می‌توانی آب بخری. ظرفیت چاه ۱۰۰ بطری است.</p>
    <div class="well-stock"><span>موجودی آب چاه</span><strong id="wellStock">۱۰۰ از ۱۰۰</strong><small id="wellRegenInfo">هر دقیقه یک بطری به چاه اضافه می‌شود.</small></div>
    <div class="item"><span>💧 قیمت هر بطری آب</span><b>۲٬۰۰۰ تومان</b></div>
-   <div class="well-actions"><button class="primary" id="buyWellWaterBtn">خرید یک آب</button><button class="secondary" id="closeWellBtn">بستن</button></div>
+   <div class="well-actions"><button class="primary" id="buyWellWaterBtn">برداشت آب</button><button class="secondary" id="wellResizeOption">تغییر اندازه چاه آب</button></div>
+   <div id="wellResizePanel" class="hidden" style="margin-top:12px">
+    <label for="wellCapacityInput">ظرفیت جدید چاه (بطری)</label>
+    <input id="wellCapacityInput" type="number" min="1" max="1000000" step="1" value="100">
+    <div class="well-actions" style="margin-top:8px"><button class="primary" id="wellCapacityConfirm">تأیید اندازه</button><button class="secondary" id="wellCapacityCancel">لغو</button></div>
+   </div>
+   <button class="secondary full" id="closeWellBtn">بستن</button>
    <div class="msg" id="wellMsg"></div>
   </div>
  </div>
@@ -517,7 +523,7 @@ const SERVER_ORIGIN="https://my-online-game-67j9.onrender.com";
 const API=SERVER_ORIGIN+"/api";
 let authToken=null, selectedServer="1", onlinePlayers=[], syncBusy=false;
 let pendingAppInventorFcmToken=null, registeredAppInventorFcmToken="", fcmRegisterBusy=false;
-let wellState={stock:100,last_regen_at:0};
+let wellState={stock:100,capacity:100,last_regen_at:0};
 let syncTimer=null,wellTimer=null;
 let realtimeSocket=null, realtimeSendTimer=null, realtimePingTimer=null, realtimeReconnectTimer=null, realtimeRetryCount=0, realtimeLastPong=0;
 let currentAnnouncement=null, announcementPollTimer=null, announcementClockTimer=null, lastAnnouncementId=null;
@@ -745,15 +751,18 @@ async function refreshWell(){
  if(!account||!authToken)return;
  try{
   const d=await api("/well");
-  wellState.stock=Math.max(0,Math.min(100,Number(d.stock)||0));
+  wellState.capacity=Math.max(1,Number(d.capacity)||100);
+  wellState.stock=Math.max(0,Math.min(wellState.capacity,Number(d.stock)||0));
   wellState.last_regen_at=Number(d.last_regen_at)||0;
   if(!$("wellModal").classList.contains("hidden"))renderWell();
  }catch(e){/* WebSocket may still deliver updates; retry on next poll. */}
 }
 function renderWell(){
  if(!account)return;
- const stock=Math.max(0,Math.min(100,Number(wellState.stock)||0));
- $("wellStock").textContent=fmt(stock)+" از ۱۰۰";
+ const capacity=Math.max(1,Number(wellState.capacity)||100);
+ const stock=Math.max(0,Math.min(capacity,Number(wellState.stock)||0));
+ $("wellStock").textContent=fmt(stock)+" از "+fmt(capacity);
+ $("wellResizeOption").classList.toggle("hidden",!isCreatorAccount());
  const cannotBuy=stock<1||account.balance<2000;
  $("buyWellWaterBtn").disabled=cannotBuy;
  $("buyWellWaterBtn").style.opacity=cannotBuy?".55":"1";
@@ -840,7 +849,8 @@ function applyRealtimeMessage(data){
   const target=onlinePlayers.find(p=>Number(p.id)===Number(data.player_id));if(target)target.is_mayor=!!data.is_mayor;
   if(account&&(Number(account.id)===Number(data.player_id)||account.name===data.player_name)){isCurrentMayor=!!data.is_mayor;delegatedBuilderAccess=!!data.is_mayor;if(!data.is_mayor)builderToken=null;updateBuilderVisibility();render();}
  }else if(data.type==="well"){
-  wellState.stock=Math.max(0,Math.min(100,Number(data.stock)||0));
+  wellState.capacity=Math.max(1,Number(data.capacity)||wellState.capacity||100);
+  wellState.stock=Math.max(0,Math.min(wellState.capacity,Number(data.stock)||0));
   wellState.last_regen_at=Number(data.last_regen_at)||0;
   if(!$("wellModal").classList.contains("hidden"))renderWell();
  }
@@ -1020,8 +1030,8 @@ function tryUnlockOrientation(){
 let world3d=null;
 // مقیاس مدل: قد نهایی کاراکتر ۱٫۸ متر
 const PLAYER_MODEL_SCALE=0.048;
-// سرعت حرکت: ۱۰ کیلومتر بر ساعت (۲٫۷۷۷۸ متر بر ثانیه)
-const PLAYER_SPEED_MPS=10/3.6;
+// سرعت حرکت: ۲۰ کیلومتر بر ساعت (۵٫۵۵۵۶ متر بر ثانیه)
+const PLAYER_SPEED_MPS=20/3.6;
 function createPlayerMesh(colorBody="#2874bd",colorHead="#f3c6a0"){
  const g=new THREE.Group();
  const body=new THREE.Mesh(new THREE.CapsuleGeometry(7,14,4,8),new THREE.MeshStandardMaterial({color:colorBody,roughness:.7}));
@@ -1218,7 +1228,7 @@ function nearBusStop(x,y,radius=40){return (busStops||[]).some(s=>Math.hypot(Num
 let busStopPlacementActive=false,busStopPlacementPoint=null,busStopPlacementScale=1,busStopPlacementRotation=0,busStopEditingId=null,busStopEditingMesh=null;
 async function startBusStop3DPlacement(){
  if(!isCreatorAccount()){alert("فقط سازنده بازی می‌تواند ایستگاه بسازد.");return;}
- if(!builderToken){alert("ابتدا ابزار ساخت را فعال کن؛ سپس ساخت ایستگاه در سوم‌شخص در دسترس است.");return;}
+ if(!(await ensureCreatorBuildUnlocked()))return;
  if(cameraMode!=="third"||!immersiveActive||!world3d){alert("ابتدا دوربین را روی حالت سوم‌شخص قرار بده.");return;}
  try{
   const template=await loadBusStopModel();
@@ -1292,7 +1302,7 @@ function syncRoads3D(){
   if(world3d.roadMeshes.has(key))return;
   const g=new THREE.Group();
   // ضخامت آسفالت ۱۲ سانتی‌متر
-  const mesh=new THREE.Mesh(new THREE.BoxGeometry(48,0.12,48),asphaltMat);
+  const mesh=new THREE.Mesh(new THREE.BoxGeometry((Number(t.orientation)||0)===1?3:48,0.12,(Number(t.orientation)||0)===1?48:3),asphaltMat);
   mesh.position.y=0.06;mesh.receiveShadow=true;mesh.castShadow=true;g.add(mesh);
   // خط‌کشی وسط بر اساس orientation
   const orient=Number(t.orientation)||0;
@@ -1520,7 +1530,21 @@ function updateGpsVisibility(){
  const show=!!account&&isCreatorAccount()&&cameraMode==="third"&&immersiveActive;
  b.classList.toggle("gps-visible",show);
 }
-function openGpsMenu(){if(!isCreatorAccount()||cameraMode!=="third")return;$("gpsModal").classList.remove("hidden");$("gpsChooseType").style.display="block";$("gpsPlacementActions").classList.remove("active");$("gpsStatus").textContent="نوع زمین را انتخاب کن.";}
+async function ensureCreatorBuildUnlocked(){
+ if(!isCreatorAccount())return false;
+ if(builderToken)return true;
+ const pass=prompt("رمز ساخت را وارد کن:");
+ if(pass===null)return false;
+ if(pass.length<4){alert("رمز باید حداقل ۴ نویسه داشته باشد.");return false;}
+ try{
+  const d=await api("/builder/unlock",{password:pass});
+  builderToken=d.builder_token;builderMode=true;rotateRoadMode=false;updateBuilderVisibility();
+  $("asphaltToolButton").classList.remove("hidden");$("rotateRoadButton").classList.remove("hidden");
+  $("adminPlayersButton").disabled=false;
+  return true;
+ }catch(e){alert(e.message||"رمز ساخت درست نیست.");return false;}
+}
+async function openGpsMenu(){if(!isCreatorAccount()||cameraMode!=="third")return;if(!(await ensureCreatorBuildUnlocked()))return;$("gpsModal").classList.remove("hidden");$("gpsChooseType").style.display="block";$("gpsPlacementActions").classList.remove("active");$("gpsStatus").textContent="نوع زمین را انتخاب کن.";}
 function closeGpsMenu(){if(landPlacementType)cancelLandPlacement();$("gpsModal").classList.add("hidden");}
 function clearLandDraftVisuals(){
  if(!world3d)return;
@@ -2232,9 +2256,10 @@ function drawOverviewMap(){
  // Existing custom asphalt tiles.
  mapCtx.fillStyle="#343b3e";
  (roadTiles||[]).forEach(t=>{
-  const x=wx(Number(t.x)*48),y=wy(Number(t.y)*48);
-  const size=48*scale;
-  mapCtx.fillRect(x,y,size,size);
+  const cx=wx(Number(t.x)*48+24),cy=wy(Number(t.y)*48+24);
+  const length=48*scale,width=3*scale;
+  mapCtx.save();mapCtx.translate(cx,cy);mapCtx.rotate((Number(t.orientation)||0)===1?Math.PI/2:0);
+  mapCtx.fillRect(-length/2,-width/2,length,width);mapCtx.restore();
  });
  // Main city roads and central plaza.
  mapCtx.fillStyle="#343b3e";
@@ -2677,6 +2702,20 @@ document.querySelectorAll("[data-buy]").forEach(btn=>btn.onclick=async()=>{
 });
 $("closeWellBtn").onclick=closeWell;
 $("wellModal").addEventListener("click",e=>{if(e.target===$("wellModal"))closeWell()});
+$("wellResizeOption").onclick=async()=>{
+ if(!isCreatorAccount())return;
+ if(!(await ensureCreatorBuildUnlocked()))return;
+ $("wellCapacityInput").value=String(wellState.capacity||100);
+ $("wellResizePanel").classList.remove("hidden");
+};
+$("wellCapacityCancel").onclick=()=>$("wellResizePanel").classList.add("hidden");
+$("wellCapacityConfirm").onclick=async()=>{
+ const capacity=Math.floor(Number($("wellCapacityInput").value));
+ if(!Number.isSafeInteger(capacity)||capacity<1||capacity>1000000){$("wellMsg").textContent="اندازه باید بین ۱ تا ۱٬۰۰۰٬۰۰۰ بطری باشد.";return;}
+ const btn=$("wellCapacityConfirm");btn.disabled=true;
+ try{const d=await api("/well/resize",{capacity},{"X-Builder-Token":builderToken});wellState.capacity=d.well.capacity;wellState.stock=d.well.stock;wellState.last_regen_at=d.well.last_regen_at;$("wellResizePanel").classList.add("hidden");renderWell();$("wellMsg").textContent="اندازه چاه برای همه کاربران این سرور ذخیره شد.";}
+ catch(e){$("wellMsg").textContent=e.message||"تغییر اندازه انجام نشد.";}finally{btn.disabled=false;}
+};
 $("buyWellWaterBtn").onclick=async()=>{
  if(!account||!authToken)return;
  $("buyWellWaterBtn").disabled=true;
@@ -2684,6 +2723,7 @@ $("buyWellWaterBtn").onclick=async()=>{
  try{
   const d=await api("/well/buy",{});
   account=d.state;account.lastActiveAt=Date.now();
+  wellState.capacity=Math.max(1,Number(d.well.capacity)||wellState.capacity||100);
   wellState.stock=Number(d.well.stock)||0;
   wellState.last_regen_at=Number(d.well.last_regen_at)||0;
   log("از چاه آب یک بطری آب خریدی.");
