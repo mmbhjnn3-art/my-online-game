@@ -159,7 +159,9 @@ body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:n
 #roadMoveToggle.active{background:#a34a24;color:#fff;border-color:#ffcf70}
 #overheadCameraExit{display:none;position:fixed;left:14px;top:max(12px,env(safe-area-inset-top));z-index:100180;background:#173d30;color:#fff;border:2px solid #ffd166;border-radius:12px;padding:10px 12px;font-weight:900}
 body.immersive-camera #overheadCameraButton,body.immersive-camera #roadMoveToggle{display:block}
-body.overhead-inspector #overheadCameraButton,body.overhead-inspector #roadMoveToggle{display:none!important}
+body.overhead-inspector #overheadCameraButton{display:none!important}
+body.overhead-inspector #roadMoveToggle{display:block!important}
+body.overhead-inspector #roadBuild3DButton{display:block!important;top:max(222px,calc(env(safe-area-inset-top) + 206px))}
 body.overhead-inspector #overheadCameraExit{display:block}
 body.overhead-inspector #city3dCanvas{touch-action:none}
 body.overhead-inspector .joy-wrap{display:flex!important}
@@ -1370,14 +1372,18 @@ function makeRoadVisual(type="asphalt",orientation=0){
   case "left_turn":addArc(-24,-24,24,0,Math.PI/2,16,12);dashCurve(-24,-24,24,0,Math.PI/2,12);break;
   case "three_way":addBox(16,48);addBox(24,16,12,0,Math.PI/2);dashAxis("z",-23,23);dashAxis("x",2,23);break;
   case "four_way":addBox(16,48);addBox(16,48,0,0,Math.PI/2);dashAxis("z",-23,23);dashAxis("x",-23,23);break;
-  case "u_turn":addArc(0,0,17,Math.PI,0,12,16);dashCurve(0,0,17,Math.PI,0,16);break;
+  case "u_turn":addArc(0,0,17,Math.PI,0,16,16);dashCurve(0,0,17,Math.PI,0,16);break;
   case "roundabout":{
-   const ring=new THREE.Mesh(new THREE.TorusGeometry(13,6,8,36),mat);ring.rotation.x=Math.PI/2;ring.position.y=.06;ring.receiveShadow=true;ring.castShadow=true;g.add(ring);
-   addBox(12,13,0,-17);addBox(12,13,0,17);addBox(12,13,-17,0,Math.PI/2);addBox(12,13,17,0,Math.PI/2);
+   const ring=new THREE.Mesh(new THREE.TorusGeometry(13,8,8,36),mat);ring.rotation.x=Math.PI/2;ring.position.y=.06;ring.receiveShadow=true;ring.castShadow=true;g.add(ring);
+   addBox(16,13,0,-17);addBox(16,13,0,17);addBox(16,13,-17,0,Math.PI/2);addBox(16,13,17,0,Math.PI/2);
    const lane=new THREE.Mesh(new THREE.TorusGeometry(13,.65,5,48),dashMat);lane.rotation.x=Math.PI/2;lane.position.y=.15;g.add(lane);
    dashAxis("z",-23,-17);dashAxis("z",17,23);dashAxis("x",-23,-17);dashAxis("x",17,23);break;
   }
-  case "asphalt":default:addBox(48,48);if((Number(orientation)||0)%2===0)addDash(1.2,30);else addDash(30,1.2);break;
+  case "asphalt":default:
+   // تمام قطعات در یک خانه ۴۸×۴۸ قرار می‌گیرند و عرض مسیر در همه مدل‌ها ۱۶ واحد است.
+   addBox(16,48);
+   dashAxis("z",-23,23);
+   break;
  }
  g.rotation.y=((Number(orientation)||0)%4)*Math.PI/2;g.userData.tileType=type;return g;
 }
@@ -1514,7 +1520,7 @@ function enterOverheadInspector(){
  overheadInspector=true;moveX=0;moveY=0;joyActive=false;touchLookActive=false;roadDragActive=false;inspectorPointers.clear();
  overheadCenterX=Number(account?.playerX)||0;overheadCenterZ=Number(account?.playerY)||0;overheadZoom=420;
  if(world3d&&world3d.camera){world3d.camera.up.set(0,0,-1);world3d.camera.position.set(overheadCenterX,overheadZoom,overheadCenterZ);world3d.camera.lookAt(overheadCenterX,0,overheadCenterZ);}
- document.body.classList.add("overhead-inspector");
+ document.body.classList.add("overhead-inspector");updateBuilderVisibility();
  $("cityMsg").textContent="نمای مستقیم از بالا؛ با دو انگشت زوم و با یک انگشت دوربین را جابه‌جا کن.";resize3D();
 }
 function exitOverheadInspector(){overheadInspector=false;inspectorPointers.clear();document.body.classList.remove("overhead-inspector");camUpRestore3D();moveX=0;moveY=0;stopJoystick();updateBuilderVisibility();resize3D();render3D();}
@@ -1618,7 +1624,7 @@ function updateBuilderVisibility(){
  controls.classList.toggle("hidden",!allowed);
  const overheadBtn=$("overheadCameraButton"),roadMoveBtn=$("roadMoveToggle");
  if(overheadBtn)overheadBtn.style.display=((isCreatorAccount()||isCurrentMayor)&&cameraMode==="third"&&immersiveActive&&!overheadInspector)?"block":"none";
- if(roadMoveBtn)roadMoveBtn.style.display=(allowed&&cameraMode==="third"&&immersiveActive&&!overheadInspector)?"block":"none";
+ if(roadMoveBtn)roadMoveBtn.style.display=(allowed&&cameraMode==="third"&&immersiveActive)?"block":"none";
  $("adminManagementSection").classList.toggle("hidden",!isCreatorAccount());
  $("updateManagementSection").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  $("mapAddMarkerButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
@@ -2590,9 +2596,20 @@ if(c3el){
   if(!immersiveActive||!account)return;
   if(overheadInspector){
    e.preventDefault();c3el.setPointerCapture(e.pointerId);
+   moveX=0;moveY=0;joyActive=false;touchLookActive=false;
+   // In overhead mode, a selected road tool places a new tile; the move toggle selects saved tiles.
+   if(inspectorPointers.size===0&&builderToken&&roadPlacementActive){
+    const point=getGroundPoint(e.clientX,e.clientY);
+    if(point&&Math.abs(point.x)<=CITY_HALF&&Math.abs(point.z)<=CITY_HALF){setPendingRoad(point);roadPlacementActive=false;roadDragActive=!!pendingRoad;}
+    return;
+   }
+   if(inspectorPointers.size===0&&builderToken&&roadMoveEnabled){
+    const hit=roadHit(e.clientX,e.clientY);
+    if(hit&&!pendingRoad){const key=hit.userData.roadKey;if(key){editingRoadKey=key;showRoadActions();roadDragActive=true;roadDragMoved=false;roadDragOriginal={key,mesh:hit,position:hit.position.clone()};return;}}
+   }
    inspectorPointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
    if(inspectorPointers.size===2){const pts=[...inspectorPointers.values()];inspectorPinchStart=Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y);inspectorZoomStart=overheadZoom;}
-   moveX=0;moveY=0;joyActive=false;return;
+   return;
   }
   c3el.setPointerCapture(e.pointerId);
   touchLookMoved=false;
@@ -2646,6 +2663,15 @@ if(c3el){
   touchLookLastY=e.clientY;
  });
  c3el.addEventListener("pointermove",e=>{
+  if(overheadInspector&&roadDragActive&&(pendingRoad||roadDragOriginal)){
+   e.preventDefault();const point=getGroundPoint(e.clientX,e.clientY);
+   if(point&&Math.abs(point.x)<=CITY_HALF&&Math.abs(point.z)<=CITY_HALF){
+    const c=roadCellAt(point),x=c.x*48+24,z=c.y*48+24;
+    if(pendingRoad){pendingRoad.x=c.x;pendingRoad.y=c.y;pendingRoad.mesh.position.set(x,0,z);}
+    else if(roadDragOriginal){if(Math.abs(x-roadDragOriginal.position.x)+Math.abs(z-roadDragOriginal.position.z)>2)roadDragMoved=true;roadDragOriginal.mesh.position.set(x,0,z);roadDragOriginal.target={x:c.x,y:c.y};}
+   }
+   render3D();return;
+  }
   if(overheadInspector&&inspectorPointers.has(e.pointerId)){
    e.preventDefault();const previous=inspectorPointers.get(e.pointerId);
    inspectorPointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
@@ -2654,7 +2680,7 @@ if(c3el){
     if(inspectorPinchStart>0)overheadZoom=Math.max(90,Math.min(1800,inspectorZoomStart*inspectorPinchStart/Math.max(1,distance)));
    }else{
     const scale=overheadZoom/Math.max(180,c3el.clientHeight);
-    overheadCenterX+=(e.clientX-previous.x)*scale;overheadCenterZ+=(e.clientY-previous.y)*scale;
+    overheadCenterX-=(e.clientX-previous.x)*scale;overheadCenterZ-=(e.clientY-previous.y)*scale;
    }
    render3D();return;
   }
@@ -2672,6 +2698,9 @@ if(c3el){
   syncFacingFromYaw();
  });
  c3el.addEventListener("pointerup",e=>{
+  if(overheadInspector&&roadDragActive&&(pendingRoad||roadDragOriginal)){
+   roadDragActive=false;showRoadActions();touchLookActive=false;touchLookMoved=false;render3D();return;
+  }
   if(overheadInspector&&inspectorPointers.has(e.pointerId)){
    inspectorPointers.delete(e.pointerId);if(inspectorPointers.size<2){inspectorPinchStart=0;inspectorZoomStart=overheadZoom;}return;
   }
@@ -2682,7 +2711,7 @@ if(c3el){
   if(immersiveActive&&!touchLookMoved&&hitWell3D(e.clientX,e.clientY))tryOpenWellFrom3D();
   touchLookActive=false;touchLookMoved=false;save();
  });
- c3el.addEventListener("pointercancel",e=>{inspectorPointers.delete(e.pointerId);if(inspectorPointers.size<2)inspectorPinchStart=0;landDraggingLastPoint=false;touchLookActive=false;touchLookMoved=false;});
+ c3el.addEventListener("pointercancel",e=>{inspectorPointers.delete(e.pointerId);if(inspectorPointers.size<2)inspectorPinchStart=0;if(overheadInspector&&roadDragActive){roadDragActive=false;if(roadDragOriginal&&roadDragOriginal.mesh&&roadDragOriginal.position)roadDragOriginal.mesh.position.copy(roadDragOriginal.position);}landDraggingLastPoint=false;touchLookActive=false;touchLookMoved=false;});
 }
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden"){moveX=0;moveY=0;pauseGameClock();}else if(account && !$("game").classList.contains("hidden")){resumeGameClock();}});
 
