@@ -451,8 +451,6 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
        <button type="button" data-road-type="left_turn"><span class="road-preview">↰</span>پیچ گرد چپ</button>
        <button type="button" data-road-type="three_way"><span class="road-preview">┳</span>سه‌راهی</button>
        <button type="button" data-road-type="four_way"><span class="road-preview">╋</span>چهارراهی</button>
-       <button type="button" data-road-type="u_turn"><span class="road-preview">↶</span>دوربرگردان ۱۸۰°</button>
-       <button type="button" data-road-type="roundabout"><span class="road-preview">◉</span>میدان</button>
       </div>
       <button type="button" id="roadBuildClose" class="secondary full">بستن</button>
      </div>
@@ -1401,6 +1399,14 @@ function makeRoadVisual(type="asphalt",orientation=0){
    dashAxis("z",-23,23);
    break;
  }
+ // سطح نامرئیِ تمام‌خانه‌ای برای انتخاب مطمئن همه قطعات با لمس؛ روی ظاهر آسفالت اثری ندارد.
+ const hitArea=new THREE.Mesh(
+  new THREE.BoxGeometry(48,0.5,48),
+  new THREE.MeshBasicMaterial({transparent:true,opacity:0,colorWrite:false,depthWrite:false})
+ );
+ hitArea.position.y=0.25;
+ hitArea.userData.roadHitArea=true;
+ g.add(hitArea);
  g.rotation.y=((Number(orientation)||0)%4)*Math.PI/2;g.userData.tileType=type;return g;
 }
 function syncRoads3D(){
@@ -1896,9 +1902,41 @@ function setPendingRoad(point){
 function replacePendingRoadVisual(){if(!pendingRoad||!world3d)return;world3d.scene.remove(pendingRoad.mesh);pendingRoad.mesh=makeRoadVisual(pendingRoad.tile_type,pendingRoad.orientation);pendingRoad.mesh.position.set(pendingRoad.x*48+24,0,pendingRoad.y*48+24);world3d.scene.add(pendingRoad.mesh);showRoadActions();}
 async function confirmRoadEdit(){
  if(!builderToken)return;
- if(pendingRoad){const {mesh,...tile}=pendingRoad;if(roadTiles.some(t=>Number(t.x)===tile.x&&Number(t.y)===tile.y)){$("cityMsg").textContent="این خانه قبلاً آسفالت دارد.";return;}try{const d=await roadAction("/roads",tile,{retryable:true});roadTiles.push(d.tile||tile);world3d.scene.remove(mesh);pendingRoad=null;syncRoads3D();drawOverviewMap();hideRoadActions();$("cityMsg").textContent="آسفالت ذخیره شد.";}catch(e){$("cityMsg").textContent=e.message||"ذخیره آسفالت انجام نشد.";}return;}
- if(roadDragOriginal&&roadDragOriginal.target){const old=roadDragOriginal.key.split(",").map(Number),target=roadDragOriginal.target;if(target.x===old[0]&&target.y===old[1]){hideRoadActions();return;}if(roadTiles.some(t=>Number(t.x)===target.x&&Number(t.y)===target.y)){roadDragOriginal.mesh.position.copy(roadDragOriginal.position);$("cityMsg").textContent="خانه مقصد قبلاً آسفالت دارد.";return;}const original=roadTiles.find(t=>Number(t.x)===old[0]&&Number(t.y)===old[1]);try{await roadAction("/roads/delete",{x:old[0],y:old[1]});try{const d=await roadAction("/roads",{x:target.x,y:target.y,tile_type:original?.tile_type||"asphalt",orientation:Number(original?.orientation)||0},{retryable:true});roadTiles=roadTiles.filter(t=>!(Number(t.x)===old[0]&&Number(t.y)===old[1]));roadTiles.push(d.tile||{x:target.x,y:target.y,tile_type:original?.tile_type||"asphalt",orientation:Number(original?.orientation)||0});syncRoads3D();drawOverviewMap();hideRoadActions();$("cityMsg").textContent="آسفالت جابه‌جا شد.";}catch(err){await roadAction("/roads",{x:old[0],y:old[1],tile_type:original?.tile_type||"asphalt",orientation:Number(original?.orientation)||0},{retryable:true});throw err;}}catch(e){roadDragOriginal.mesh.position.copy(roadDragOriginal.position);$("cityMsg").textContent=e.message||"جابه‌جایی آسفالت انجام نشد.";}}
- else hideRoadActions();
+ if(pendingRoad){
+  const {mesh,...tile}=pendingRoad;
+  if(roadTiles.some(t=>Number(t.x)===tile.x&&Number(t.y)===tile.y)){
+   $("cityMsg").textContent="این خانه قبلاً آسفالت دارد.";return;
+  }
+  try{
+   const d=await roadAction("/roads",tile,{retryable:true});
+   roadTiles.push(d.tile||tile);world3d.scene.remove(mesh);pendingRoad=null;
+   syncRoads3D();drawOverviewMap();hideRoadActions();
+   $("cityMsg").textContent="آسفالت ذخیره شد.";
+  }catch(e){$("cityMsg").textContent=e.message||"ذخیره آسفالت انجام نشد.";}
+  return;
+ }
+ if(roadDragOriginal&&roadDragOriginal.target){
+  const old=roadDragOriginal.key.split(",").map(Number),target=roadDragOriginal.target;
+  if(target.x===old[0]&&target.y===old[1]){hideRoadActions();return;}
+  if(roadTiles.some(t=>Number(t.x)===target.x&&Number(t.y)===target.y)){
+   roadDragOriginal.mesh.position.copy(roadDragOriginal.position);
+   roadDragOriginal.target={x:old[0],y:old[1]};
+   $("cityMsg").textContent="خانه مقصد قبلاً آسفالت دارد؛ محل قبلی حفظ شد.";return;
+  }
+  try{
+   const d=await roadAction("/roads/move",{
+    from_x:old[0],from_y:old[1],to_x:target.x,to_y:target.y
+   },{retryable:true});
+   roadTiles=roadTiles.filter(t=>!(Number(t.x)===old[0]&&Number(t.y)===old[1]));
+   roadTiles.push(d.tile);
+   syncRoads3D();drawOverviewMap();hideRoadActions();
+   $("cityMsg").textContent="آسفالت با موفقیت جابه‌جا شد.";
+  }catch(e){
+   roadDragOriginal.mesh.position.copy(roadDragOriginal.position);
+   roadDragOriginal.target={x:old[0],y:old[1]};
+   $("cityMsg").textContent=e.message||"جابه‌جایی آسفالت انجام نشد؛ قطعه در محل قبلی باقی ماند.";
+  }
+ }else hideRoadActions();
 }
 async function rotateRoadEdit(){
  if(!builderToken)return;if(pendingRoad){pendingRoad.orientation=(pendingRoad.orientation+1)%4;replacePendingRoadVisual();return;}if(!roadDragOriginal)return;const [x,y]=roadDragOriginal.key.split(",").map(Number);
