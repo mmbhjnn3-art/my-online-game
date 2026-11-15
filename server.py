@@ -1498,8 +1498,8 @@ async def create_land_plot(
         area = abs(sum(points[i][0]*points[(i+1)%len(points)][1] -
                        points[(i+1)%len(points)][0]*points[i][1]
                        for i in range(len(points))) / 2)
-        if area < 100:
-            raise HTTPException(400, "مساحت زمین خیلی کوچک است.")
+        if area < 1:
+            raise HTTPException(400, "حداقل مساحت قابل ساخت یک متر مربع است.")
         cx = sum(p[0] for p in points) / len(points)
         cy = sum(p[1] for p in points) / len(points)
         now = int(time.time())
