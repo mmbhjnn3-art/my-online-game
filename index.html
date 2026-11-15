@@ -140,7 +140,9 @@ body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:n
 .water-guide-hint{position:fixed;z-index:120;top:12px;left:12px;right:12px;max-width:560px;margin:auto;background:linear-gradient(135deg,#18254d,#243d70);color:#fff;border:2px solid #ffd34e;border-radius:15px;padding:13px 15px;box-shadow:0 8px 28px #0008;display:flex;align-items:center;gap:12px;font-weight:bold;line-height:1.8}.water-guide-hint span{flex:1}.water-guide-hint button{flex:0 0 auto;background:#fff;color:#17234a;border:0;border-radius:9px;padding:8px 13px;font-weight:bold}
 
 #asphaltToolButton,#rotateRoadButton{display:none!important}
-#roadBuild3DButton{display:none;position:fixed;right:14px;top:max(72px,env(safe-area-inset-top));z-index:100140;background:#153b2e;color:#ffe08a;border:2px solid #ffd166;border-radius:14px;padding:11px 14px;font-weight:900;box-shadow:0 5px 18px #0008}
+/* دکمه ورود به ابزار ساخت در نمای بالا مخفی است؛ ساخت آسفالت فقط از دکمه سوم‌شخص انجام می‌شود. */
+#builderButton{display:none!important}
+#roadBuild3DButton{display:none;position:fixed;right:14px;top:max(216px,calc(env(safe-area-inset-top) + 200px));z-index:100160;background:#153b2e;color:#ffe08a;border:2px solid #ffd166;border-radius:14px;padding:11px 14px;font-weight:900;box-shadow:0 5px 18px #0008}
 #roadBuildModal{position:fixed;inset:0;z-index:100300;background:#000c;display:flex;align-items:center;justify-content:center;padding:14px}
 #roadBuildModal.hidden{display:none!important}
 .road-build-window{width:min(100%,420px);background:linear-gradient(145deg,#21483b,#10271f);border:2px solid #ffd166;border-radius:18px;padding:15px;max-height:85vh;overflow:auto}
@@ -1473,7 +1475,7 @@ function enterImmersiveCamera(){
  }else{
   console.warn("Three.js بارگذاری نشد؛ حالت ۲بعدی حفظ می‌شود.");
  }
- drawCity();updateGpsVisibility();
+ drawCity();updateBuilderVisibility();updateGpsVisibility();
 }
 function exitImmersiveCamera(){
  if(!immersiveActive)return;
@@ -1487,7 +1489,7 @@ function exitImmersiveCamera(){
   }
  }catch(e){}
  resizeCityCanvasForMode();
- drawCity();updateGpsVisibility();
+ drawCity();updateBuilderVisibility();updateGpsVisibility();
 }
 function cycleCameraMode(){
  if(cameraMode==="top"){
