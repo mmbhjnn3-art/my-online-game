@@ -659,7 +659,7 @@ let wellState={stock:100,capacity:100,scale:0.05,last_regen_at:0};
 let syncTimer=null,wellTimer=null;
 let realtimeSocket=null, realtimeSendTimer=null, realtimePingTimer=null, realtimeReconnectTimer=null, realtimeRetryCount=0, realtimeLastPong=0;
 let currentAnnouncement=null, announcementPollTimer=null, announcementClockTimer=null, lastAnnouncementId=null;
-const GAME_BUILD_VERSION = "1";
+const GAME_BUILD_VERSION = "2";
 function getInstalledAppVersion(){
  try{
   const queryVersion=new URLSearchParams(window.location.search).get("app_version");
@@ -3010,7 +3010,7 @@ $("registerBtn").onclick=async()=>{
  try{
   selectedServer=$("serverSelect").value;
   if(!(await checkVersionBeforeLogin()))return;
-   const d=await api("/register",{name,age,password:pass,server_id:Number(selectedServer)});
+   const d=await api("/register",{name,age,password:pass,server_id:Number(selectedServer),app_version:INSTALLED_APP_VERSION});
   authToken=d.token;registeredAppInventorFcmToken="";account=d.state;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";account.nameKey=String(account.name||name).trim().replace(/\s+/g," ").toLocaleLowerCase();account.lastActiveAt=Date.now();
   log("شروع زندگی در سرور "+selectedServer);save();showGame();
  }catch(e){$("regMsg").textContent=e.message}
@@ -3035,7 +3035,7 @@ $("loginBtn").onclick=async()=>{
  try{
   selectedServer=$("serverSelect").value;
   if(!(await checkVersionBeforeLogin()))return;
-   const d=await api("/login",{name,password:pass,server_id:Number(selectedServer)});
+   const d=await api("/login",{name,password:pass,server_id:Number(selectedServer),app_version:INSTALLED_APP_VERSION});
   authToken=d.token;registeredAppInventorFcmToken="";account=d.state;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";account.nameKey=String(account.name||name).trim().replace(/\s+/g," ").toLocaleLowerCase();account.lastActiveAt=null;
   account.inventory=account.inventory||{};account.journal=account.journal||[];account.xp=account.xp||0;
   account.playerX=Math.max(-CITY_HALF,Math.min(CITY_HALF,Number.isFinite(account.playerX)?account.playerX:0));account.playerY=Math.max(-CITY_HALF,Math.min(CITY_HALF,Number.isFinite(account.playerY)?account.playerY:0));
