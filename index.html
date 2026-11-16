@@ -92,10 +92,10 @@ body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:n
 /* پنجره اختصاصی الزام به بروزرسانی؛ بدون نمایش آدرس سایت */
 #requiredUpdateModal{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:22px;background:rgba(0,0,0,.72);direction:rtl;font-family:Tahoma,Arial,sans-serif}
 #requiredUpdateModal.hidden{display:none!important}
-#requiredUpdateModal .required-update-box{width:min(100%,440px);padding:26px 22px 20px;border-radius:18px;background:#fff;color:#222;text-align:center;box-shadow:0 18px 60px #0008}
-#requiredUpdateModal h2{margin:0 0 16px;font-size:22px;color:#17251f}
-#requiredUpdateModal p{margin:0 0 22px;font-size:17px;line-height:2;color:#303030}
-#requiredUpdateConfirm{min-width:120px;padding:12px 24px;border:0;border-radius:10px;background:#d94b8b;color:#fff;font:bold 16px Tahoma,Arial,sans-serif}
+#requiredUpdateModal .required-update-box{width:min(100%,440px);padding:26px 22px 20px;border-radius:20px;background:linear-gradient(145deg,#e8fff0,#c9f4d8);border:2px solid #31a866;color:#123b25;text-align:center;box-shadow:0 18px 60px #0008}
+#requiredUpdateModal h2{margin:0 0 16px;font-size:22px;color:#126638}
+#requiredUpdateModal p{margin:0 0 22px;font-size:17px;line-height:2;color:#174b2d}
+#requiredUpdateConfirm{min-width:120px;padding:12px 24px;border:0;border-radius:10px;background:#188849;color:#fff;font:bold 16px Tahoma,Arial,sans-serif}
 
 /* افزوده‌شده: صفحه اختصاصی هنگام قطع ارتباط */
 #offlineScreen{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;overflow:auto;background:radial-gradient(ellipse at top,#244d3e,#0c1c18 72%);padding:20px}
@@ -674,7 +674,7 @@ async function fetchRequiredVersion(){try{const r=await fetch(API+"/version",{ca
 function showRequiredUpdateModal(required){
  const modal=$("requiredUpdateModal");
  const message=$("requiredUpdateMessage");
- if(message)message.textContent="بروزرسانی جدید آمده، اپلیکیشن را بروزرسانی کنید. نسخه موردنیاز: "+required;
+ if(message)message.textContent="نسخه "+required+" منتشر شده است؛ لطفاً بازی را به‌روزرسانی کنید.";
  if(modal)modal.classList.remove("hidden");
 }
 async function checkVersionBeforeLogin(){
@@ -701,7 +701,7 @@ async function api(path,body,extraHeaders={}){
  try{
   const r=await fetch(API+path,{method:body?"POST":"GET",headers:{"Content-Type":"application/json",...(authToken?{"Authorization":"Bearer "+authToken}:{}),...extraHeaders},body:body?JSON.stringify(body):undefined,signal:controller.signal,cache:"no-store"});
   const d=await r.json().catch(()=>({detail:"پاسخ سرور قابل خواندن نیست"}));
-  if(!r.ok)throw new Error(d.detail||"خطا در ارتباط با سرور");return d;
+  if(!r.ok){const error=new Error(d.detail||"خطا در ارتباط با سرور");error.status=r.status;throw error;}return d;
  }catch(e){
   if(e.name==="AbortError")throw new Error("پاسخ سرور دیر رسید؛ اتصال دوباره بررسی می‌شود.");
   if(e instanceof TypeError)throw new Error("ارتباط با سرور برقرار نشد؛ بازی دوباره تلاش می‌کند.");
@@ -1810,15 +1810,13 @@ async function ensureCreatorBuildUnlocked(){
  if(!isCreatorAccount())return false;
  restoreBuilderToken();
  if(builderToken)return true;
- const pass=prompt("رمز ساخت را وارد کن:");
- if(pass===null)return false;
- if(pass.length<4){alert("رمز باید حداقل ۴ نویسه داشته باشد.");return false;}
- try{
-  const d=await api("/builder/unlock",{password:pass});
-  saveBuilderToken(d.builder_token);builderMode=false;rotateRoadMode=false;updateBuilderVisibility();
-  $("adminPlayersButton").disabled=false;
-  return true;
- }catch(e){alert(e.message||"رمز ساخت درست نیست.");return false;}
+ // Never use prompt(): it displays the creator password as plain text.
+ const panel=$("roadMasterPanel");
+ if(panel)panel.classList.remove("hidden");
+ const input=$("roadMasterPassword");
+ if(input){input.type="password";input.value="";setTimeout(()=>input.focus(),50);}
+ $("roadMasterMessage").textContent="رمز سازنده را در کادر امن وارد کن؛ رمز نمایش داده نمی‌شود.";
+ return false;
 }
 async function ensureRoadBuilderUnlocked(){
  restoreBuilderToken();
@@ -2226,19 +2224,18 @@ async function roadAction(path,body,options={}){
 }
 $("builderButton").onclick=async()=>{
  if(!canUseRoadBuilder())return;
- let pass="";
- if(isCreatorAccount()){
-  pass=prompt("رمز ساخت را وارد کن. فقط بار اول، این رمز ثبت می‌شود:");
-  if(pass===null)return;
-  if(pass.length<4){alert("رمز باید حداقل ۴ نویسه داشته باشد.");return;}
- }
  try{
-  const d=await api("/builder/unlock",{password:pass});
-  builderToken=d.builder_token;builderMode=false;rotateRoadMode=false;updateBuilderVisibility();
-  
-  if(isCreatorAccount()){$("adminPlayersButton").disabled=false;$("mapAddMarkerButton").classList.remove("hidden");}
+  let d=null;
+  if(isCreatorAccount()){
+   if(!(await ensureCreatorBuildUnlocked()))return;
+  }else{
+   d=await api("/builder/unlock",{password:""});
+   saveBuilderToken(d.builder_token);
+  }
+  builderMode=false;rotateRoadMode=false;updateBuilderVisibility();
+  if(isCreatorAccount()){$("adminPlayersButton").disabled=false;$ ("mapAddMarkerButton").classList.remove("hidden");}
   $("builderHint").textContent=isCreatorAccount()?"حالت آسفالت فعال است. روی خانه خالی بزن تا بسازی؛ روی آسفالت بزن تا حذف کنی.":"دسترسی ساخت آسفالت در این سرور فعال شد؛ ساخت، چرخاندن و حذف آسفالت مجاز است.";
-  $("cityMsg").textContent=isCreatorAccount()?(d.first_setup?"رمز ساخت برای اولین بار ذخیره شد؛ ابزار ساخت فعال است.":"رمز درست است؛ ابزار ساخت فعال شد."):"ابزار ساخت آسفالت در سرور شما فعال شد.";
+  $("cityMsg").textContent=isCreatorAccount()?"رمز درست است؛ ابزار ساخت فعال شد.":"ابزار ساخت آسفالت در سرور شما فعال شد.";
  }catch(e){builderToken=null;builderMode=false;$("adminPlayersButton").disabled=true;$("cityMsg").textContent=e.message;alert(e.message);}
 };
 function escapeAdminText(value){return String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
@@ -2953,9 +2950,9 @@ $("roadMasterStart").onclick=async()=>{
   if(isCreatorAccount()){
    if(!builderToken){const pass=$("roadMasterPassword").value;if(pass.length<4)throw new Error("رمز ساخت را وارد کن (حداقل ۴ نویسه).");const d=await api("/builder/unlock",{password:pass});saveBuilderToken(d.builder_token);}
   }else if(!(await ensureRoadBuilderUnlocked()))throw new Error("دسترسی ساخت فعال نشد.");
-  updateBuilderVisibility();$("roadMasterPassword").value="";$("roadMasterMessage").textContent="دسترسی ساخت برای این ورود فعال شد؛ دیگر نیازی به واردکردن دوباره رمز نیست.";
+  updateBuilderVisibility();$("roadMasterPassword").value="";$("roadMasterPanel").classList.add("hidden");$("roadMasterMessage").textContent="دسترسی ساخت برای این ورود فعال شد؛ دیگر نیازی به واردکردن دوباره رمز نیست.";
   $("roadBuildModal").classList.remove("hidden");
- }catch(e){$("roadMasterMessage").textContent=e.message||"فعال‌سازی ابزار ساخت انجام نشد.";}
+ }catch(e){$("roadMasterPassword").value="";$("roadMasterMessage").textContent=e.message||"فعال‌سازی ابزار ساخت انجام نشد.";}
  finally{btn.disabled=false;}
 };
 $("roadMasterMove").onclick=async()=>{
@@ -3034,8 +3031,7 @@ $("loginBtn").onclick=async()=>{
  $("loginMsg").textContent="";if(!name||!pass){$("loginMsg").textContent="نام و رمز را وارد کن.";return}
  try{
   selectedServer=$("serverSelect").value;
-  if(!(await checkVersionBeforeLogin()))return;
-   const d=await api("/login",{name,password:pass,server_id:Number(selectedServer),app_version:INSTALLED_APP_VERSION});
+  const d=await api("/login",{name,password:pass,server_id:Number(selectedServer),app_version:INSTALLED_APP_VERSION});
   authToken=d.token;registeredAppInventorFcmToken="";account=d.state;account.server_id=String(d.server_id||selectedServer);account.server_name=d.server_name||"";account.nameKey=String(account.name||name).trim().replace(/\s+/g," ").toLocaleLowerCase();account.lastActiveAt=null;
   account.inventory=account.inventory||{};account.journal=account.journal||[];account.xp=account.xp||0;
   account.playerX=Math.max(-CITY_HALF,Math.min(CITY_HALF,Number.isFinite(account.playerX)?account.playerX:0));account.playerY=Math.max(-CITY_HALF,Math.min(CITY_HALF,Number.isFinite(account.playerY)?account.playerY:0));
@@ -3047,6 +3043,7 @@ $("loginBtn").onclick=async()=>{
  }catch(e){
   const match=String(e.message).match(/^LOCKED:(\d+)$/);
   if(match)showLoginLock(Number(match[1]));
+  else if(e.status===426){showRequiredUpdateModal(await fetchRequiredVersion());}
   else $("loginMsg").textContent=e.message;
  }
 };
