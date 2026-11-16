@@ -336,6 +336,7 @@ def new_state(name, age):
     return {
         "name": name,
         "age": age,
+        "gender": None,
         "balance": 1000000,
         "startedAt": now,
         "gameSeconds": 0,
@@ -833,6 +834,27 @@ def login(data: LoginIn):
     return result
 
 
+class GenderIn(BaseModel):
+    gender: str = Field(pattern="^(male|female)$")
+
+
+@app.post("/api/gender")
+def set_gender(data: GenderIn, authorization: str | None = Header(default=None)):
+    """Persist a player's one-time avatar/gender choice in the shared database."""
+    with connect() as db:
+        player = current_player(db, authorization)
+        locked = db.execute("SELECT state_json FROM players WHERE id=? FOR UPDATE", (player["id"],)).fetchone()
+        state = json.loads(locked["state_json"] or "{}")
+        existing = state.get("gender")
+        if existing in ("male", "female"):
+            return {"ok": True, "gender": existing, "already_set": True}
+        state["gender"] = data.gender
+        state["updatedAt"] = int(time.time() * 1000)
+        db.execute("UPDATE players SET state_json=?, updated_at=? WHERE id=?",
+                   (json.dumps(state, ensure_ascii=False), int(time.time()), player["id"]))
+    return {"ok": True, "gender": data.gender, "already_set": False}
+
+
 @app.post("/api/save")
 def save(data: SaveIn, authorization: str | None = Header(default=None)):
     """Save only non-economic client state; never trust client-owned progress."""
@@ -901,6 +923,8 @@ def save(data: SaveIn, authorization: str | None = Header(default=None)):
         # Identity and all economic/progression fields remain server-controlled.
         state["name"] = player["name"]
         state["age"] = player["age"]
+        if state.get("gender") not in ("male", "female"):
+            state["gender"] = None
         state["updatedAt"] = now * 1000
         db.execute(
             "UPDATE players SET state_json=?, updated_at=? WHERE id=?",
