@@ -116,6 +116,7 @@ def init_db():
         db.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 token TEXT PRIMARY KEY,
+                session_id TEXT UNIQUE,
                 player_id BIGINT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
                 server_id TEXT NOT NULL,
                 last_seen BIGINT NOT NULL
@@ -126,6 +127,13 @@ def init_db():
             ON sessions(server_id, last_seen)
         """)
         db.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE")
+        db.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS session_id TEXT")
+        db.execute("UPDATE sessions SET session_id=md5(token) WHERE session_id IS NULL")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_session_id ON sessions(session_id)")
+        db.execute("""CREATE TABLE IF NOT EXISTS app_settings (
+            setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL,
+            updated_at BIGINT NOT NULL, updated_by BIGINT REFERENCES players(id) ON DELETE SET NULL
+        )""")
         db.execute("""
             CREATE TABLE IF NOT EXISTS push_subscriptions (
                 endpoint TEXT PRIMARY KEY,
@@ -387,11 +395,11 @@ def make_session(db, player_id, server_id):
     token = secrets.token_urlsafe(40)
     now = int(time.time())
 
-    db.execute("DELETE FROM sessions WHERE player_id=?", (player_id,))
+    session_id = secrets.token_urlsafe(18)
     db.execute(
-        """INSERT INTO sessions(token,player_id,server_id,last_seen)
-        VALUES(?,?,?,?)""",
-        (token, player_id, server_id, now)
+        """INSERT INTO sessions(token,session_id,player_id,server_id,last_seen)
+        VALUES(?,?,?,?,?)""",
+        (token, session_id, player_id, server_id, now)
     )
     return token
 
@@ -467,12 +475,14 @@ class RegisterIn(BaseModel):
     name: str = Field(min_length=2, max_length=24)
     age: int = Field(ge=1, le=120)
     password: str = Field(min_length=4, max_length=64)
+    app_version: str = Field(default="", max_length=32)
 
 
 class LoginIn(BaseModel):
     server_id: int = Field(ge=1, le=5)
     name: str = Field(min_length=1, max_length=24)
     password: str = Field(min_length=1, max_length=64)
+    app_version: str = Field(default="", max_length=32)
 
 
 class SaveIn(BaseModel):
@@ -639,9 +649,73 @@ def require_road_builder(db, authorization, builder_token):
     return player
 
 
+class AppVersionIn(BaseModel):
+    version: str = Field(min_length=1, max_length=32, pattern=r"^[A-Za-z0-9._-]+$")
+
+
+DEFAULT_REQUIRED_APP_VERSION = os.getenv("REQUIRED_APP_VERSION", "2").strip() or "2"
+
+
+def enforce_app_version(db, installed_version: str):
+    row = db.execute("SELECT setting_value FROM app_settings WHERE setting_key='required_app_version'").fetchone()
+    required = str(row["setting_value"] if row else DEFAULT_REQUIRED_APP_VERSION)
+    installed = str(installed_version or "").strip()
+    if not installed or not hmac.compare_digest(installed, required):
+        raise HTTPException(
+            status_code=426,
+            detail=f"بروزرسانی جدید آمده، اپلیکیشن را بروزرسانی کنید. نسخه موردنیاز: {required}"
+        )
+    return required
+
+
 @app.get("/api/version")
 def api_version():
-    return {"app": "بازی زندگی", "version": "1.3.0", "city_size": "200x200", "global_accounts": True}
+    with connect() as db:
+        row = db.execute("SELECT setting_value FROM app_settings WHERE setting_key='required_app_version'").fetchone()
+    return {"app": "بازی زندگی", "version": row["setting_value"] if row else DEFAULT_REQUIRED_APP_VERSION, "city_size": "200x200", "global_accounts": True}
+
+
+@app.post("/api/version")
+def set_app_version(data: AppVersionIn, authorization: str | None = Header(default=None)):
+    now = int(time.time())
+    with connect() as db:
+        player = current_player(db, authorization)
+        if norm_name(player["name"]) != norm_name(CREATOR_NAME):
+            raise HTTPException(403, "فقط سازنده بازی می‌تواند نسخه را تغییر دهد.")
+        db.execute("""INSERT INTO app_settings(setting_key,setting_value,updated_at,updated_by)
+            VALUES('required_app_version',?,?,?) ON CONFLICT(setting_key) DO UPDATE SET
+            setting_value=EXCLUDED.setting_value, updated_at=EXCLUDED.updated_at, updated_by=EXCLUDED.updated_by""",
+            (data.version, now, player["id"]))
+    return {"ok": True, "version": data.version}
+
+
+@app.get("/api/sessions")
+def list_my_sessions(authorization: str | None = Header(default=None)):
+    now = int(time.time())
+    with connect() as db:
+        player = current_player(db, authorization)
+        rows = db.execute("""SELECT session_id,last_seen,server_id,is_visible,token
+            FROM sessions WHERE player_id=? ORDER BY last_seen DESC""", (player["id"],)).fetchall()
+        return {"sessions": [{"id": r["session_id"], "last_seen": int(r["last_seen"]),
+            "server_id": r["server_id"], "visible": bool(r["is_visible"]),
+            "current": r["token"] == player["token"]} for r in rows]}
+
+
+class RevokeSessionIn(BaseModel):
+    session_id: str = Field(min_length=8, max_length=128)
+
+
+@app.post("/api/sessions/revoke")
+def revoke_my_session(data: RevokeSessionIn, authorization: str | None = Header(default=None)):
+    with connect() as db:
+        player = current_player(db, authorization)
+        if norm_name(player["name"]) == norm_name(CREATOR_NAME):
+            raise HTTPException(403, "ورودهای حساب سازنده بازی قابل خارج‌کردن نیستند.")
+        cur = db.execute("DELETE FROM sessions WHERE session_id=? AND player_id=? AND token<>?",
+            (data.session_id, player["id"], player["token"]))
+        if cur.rowcount < 1:
+            raise HTTPException(404, "ورود موردنظر پیدا نشد یا ورود فعلی است.")
+    return {"ok": True}
 
 
 @app.get("/health")
@@ -729,6 +803,7 @@ def register(data: RegisterIn):
     state = new_state(name, data.age)
 
     with connect() as db:
+        enforce_app_version(db, data.app_version)
         exists = db.execute(
             "SELECT 1 FROM players WHERE name_key=?",
             (key,)
@@ -771,6 +846,7 @@ def login(data: LoginIn):
     result = None
 
     with connect() as db:
+        enforce_app_version(db, data.app_version)
         # Serialize attempts for the same normalized account, including first-time attempts.
         db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (key,))
         attempt = db.execute(
