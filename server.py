@@ -846,7 +846,9 @@ def login(data: LoginIn):
     result = None
 
     with connect() as db:
-        enforce_app_version(db, data.app_version)
+        # First authenticate the account. The verified creator account is exempt
+        # from app-version enforcement so the creator can publish new versions.
+        # Ordinary players are checked only after their password is verified.
         # Serialize attempts for the same normalized account, including first-time attempts.
         db.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (key,))
         attempt = db.execute(
@@ -889,6 +891,8 @@ def login(data: LoginIn):
                 failure_message = "نام یا رمز اشتباه است."
             else:
                 db.execute("DELETE FROM login_attempts WHERE name_key=?", (key,))
+                if norm_name(row["name"]) != norm_name(CREATOR_NAME):
+                    enforce_app_version(db, data.app_version)
                 if active_count(db, sid) >= CAPACITY:
                     existing = db.execute(
                         "SELECT 1 FROM sessions WHERE player_id=? AND last_seen>=?",
