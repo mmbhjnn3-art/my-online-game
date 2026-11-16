@@ -142,7 +142,7 @@ body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:n
 #asphaltToolButton,#rotateRoadButton{display:none!important}
 /* دکمه ورود به ابزار ساخت در نمای بالا مخفی است؛ ساخت آسفالت فقط از دکمه سوم‌شخص انجام می‌شود. */
 #builderButton{display:none!important}
-#roadBuild3DButton{display:none;position:fixed;right:14px;top:max(216px,calc(env(safe-area-inset-top) + 200px));z-index:100160;background:#153b2e;color:#ffe08a;border:2px solid #ffd166;border-radius:14px;padding:11px 14px;font-weight:900;box-shadow:0 5px 18px #0008}
+#roadBuild3DButton{display:none;position:fixed;right:112px;top:16px;z-index:100160;background:#153b2e;color:#ffe08a;border:2px solid #ffd166;border-radius:14px;padding:11px 14px;font-weight:900;box-shadow:0 5px 18px #0008}
 #roadBuildModal{position:fixed;inset:0;z-index:100300;background:#000c;display:flex;align-items:center;justify-content:center;padding:14px}
 #roadBuildModal.hidden{display:none!important}
 .road-build-window{width:min(100%,420px);background:linear-gradient(145deg,#21483b,#10271f);border:2px solid #ffd166;border-radius:18px;padding:15px;max-height:85vh;overflow:auto}
@@ -161,7 +161,7 @@ body.immersive-camera .joy-wrap{position:fixed;left:28px;bottom:28px;transform:n
 body.immersive-camera #overheadCameraButton,body.immersive-camera #roadMoveToggle{display:block}
 body.overhead-inspector #overheadCameraButton{display:none!important}
 body.overhead-inspector #roadMoveToggle{display:block!important}
-body.overhead-inspector #roadBuild3DButton{display:block!important;top:max(222px,calc(env(safe-area-inset-top) + 206px))}
+body.overhead-inspector #roadBuild3DButton{display:block!important;top:16px}
 body.overhead-inspector #overheadCameraExit{display:block}
 body.overhead-inspector #city3dCanvas{touch-action:none}
 body.overhead-inspector .joy-wrap{display:flex!important}
@@ -441,7 +441,16 @@ body.immersive-camera #gpsButton.gps-visible{display:block}
      <button id="overheadCameraButton" type="button">🛰️ دوربین از بالا</button>
      <button id="roadMoveToggle" type="button">🔒 جابه‌جایی آسفالت: خاموش</button>
      <button id="overheadCameraExit" type="button">↩ بازگشت به سوم‌شخص</button>
-    <button id="roadBuild3DButton" type="button">🛣️ ساخت آسفالت</button>
+    <button id="roadBuild3DButton" type="button">🛠️ ساخت همه</button>
+    <div id="roadMasterPanel" class="hidden" role="dialog" aria-modal="true" style="position:fixed;inset:0;z-index:100280;background:#000c;display:flex;align-items:center;justify-content:center;padding:14px">
+     <div class="road-build-window">
+      <h2>ابزار ساخت شهر</h2>
+      <div id="roadMasterPasswordWrap" class="field"><label for="roadMasterPassword">رمز سازنده بازی</label><input id="roadMasterPassword" type="password" autocomplete="current-password" placeholder="رمز ساخت را وارد کن"></div>
+      <button type="button" id="roadMasterStart" class="primary">🛣️ ساخت آسفالت</button>
+      <button type="button" id="roadMasterClose" class="secondary full">بستن</button>
+      <div id="roadMasterMessage" class="msg"></div>
+     </div>
+    </div>
     <div id="roadBuildModal" class="hidden" role="dialog" aria-modal="true">
      <div class="road-build-window">
       <h2>انتخاب نوع آسفالت</h2>
@@ -1654,6 +1663,7 @@ function updateBuilderVisibility(){
  $("busStop3DButton").style.display=(isCreatorAccount()&&cameraMode==="third"&&immersiveActive)?"block":"none";
  const roadBtn=$("roadBuild3DButton");
  if(roadBtn)roadBtn.style.display=(allowed&&cameraMode==="third"&&immersiveActive)?"block":"none";
+  const passWrap=$("roadMasterPasswordWrap");if(passWrap)passWrap.style.display=isCreatorAccount()?"block":"none";
  if(!allowed){$("mapAddMarkerButton").classList.add("hidden");$("busStopToolButton").classList.add("hidden");builderToken=null;builderMode=false;rotateRoadMode=false;$("adminPlayersPanel").classList.add("hidden");$("adminPlayersButton").disabled=true;}
 }
 function updateGpsVisibility(){
@@ -1909,7 +1919,9 @@ async function confirmRoadEdit(){
   }
   try{
    const d=await roadAction("/roads",tile,{retryable:true});
-   roadTiles.push(d.tile||tile);world3d.scene.remove(mesh);pendingRoad=null;
+   const savedTile=d.tile||tile;
+    roadTiles=roadTiles.filter(t=>!(Number(t.x)===Number(savedTile.x)&&Number(t.y)===Number(savedTile.y)));
+    roadTiles.push(savedTile);world3d.scene.remove(mesh);pendingRoad=null;
    syncRoads3D();drawOverviewMap();hideRoadActions();
    $("cityMsg").textContent="آسفالت ذخیره شد.";
   }catch(e){$("cityMsg").textContent=e.message||"ذخیره آسفالت انجام نشد.";}
@@ -2786,7 +2798,20 @@ function isReservedPlayerName(value){
  const normalized=normalizeNameForFilter(value);
  return RESERVED_NAME_TERMS.some(term=>normalized.includes(normalizeNameForFilter(term)));
 }
-$("roadBuild3DButton").onclick=async()=>{if(!(await ensureRoadBuilderUnlocked()))return;$("roadBuildModal").classList.remove("hidden");};
+$("roadBuild3DButton").onclick=()=>{$("roadMasterMessage").textContent="";$("roadMasterPassword").value="";$("roadMasterPanel").classList.remove("hidden");};
+$("roadMasterClose").onclick=()=>$("roadMasterPanel").classList.add("hidden");
+$("roadMasterStart").onclick=async()=>{
+ const btn=$("roadMasterStart");btn.disabled=true;
+ try{
+  if(isCreatorAccount()){
+   const pass=$("roadMasterPassword").value;
+   if(pass.length<4)throw new Error("رمز ساخت را وارد کن (حداقل ۴ نویسه).");
+   if(!builderToken){const d=await api("/builder/unlock",{password:pass});builderToken=d.builder_token;updateBuilderVisibility();}
+  }else if(!(await ensureRoadBuilderUnlocked()))throw new Error("دسترسی ساخت فعال نشد.");
+  $("roadMasterPanel").classList.add("hidden");$("roadBuildModal").classList.remove("hidden");
+ }catch(e){$("roadMasterMessage").textContent=e.message||"فعال‌سازی ابزار ساخت انجام نشد.";}
+ finally{btn.disabled=false;}
+};
 $("roadBuildClose").onclick=()=>$("roadBuildModal").classList.add("hidden");
 document.querySelectorAll("[data-road-type]").forEach(b=>b.addEventListener("click",()=>{roadSelectedType=b.dataset.roadType||"asphalt";$("roadBuildModal").classList.add("hidden");roadPlacementActive=true;hideRoadActions();$("cityMsg").textContent="نوع آسفالت انتخاب شد؛ روی محل موردنظر در شهر لمس کن.";}));
 $("roadDeleteAction").onclick=deleteRoadEdit;$("roadRotateAction").onclick=rotateRoadEdit;$("roadConfirmAction").onclick=confirmRoadEdit;
