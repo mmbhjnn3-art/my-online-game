@@ -3328,13 +3328,22 @@ function showGuideStep(){
  $("guideArrow").textContent="⬇️ این قسمت را ببین";
  guideNext.textContent=step.last?"متوجه شدم":"بعدی";
 }
-async function createTenTestAccounts(){
- if(!isCreatorAccount()||!builderToken){alert("ابتدا با حساب سازنده وارد شو و رمز ساخت را فعال کن.");return;}
+async function createTenTestAccounts(afterPassword=false){
+ if(!isCreatorAccount()){alert("این قابلیت فقط برای حساب سازنده بازی است.");return;}
+ restoreBuilderToken();
+ if(!builderToken){
+  pendingTestAccountCreation=true;
+  $("roadMasterMessage").textContent="برای فعال‌کردن ساخت حساب آزمایشی، رمز سازنده بازی را وارد کن؛ فقط همین یک‌بار لازم است.";
+  $("roadMasterPassword").value="";
+  $("roadMasterPanel").classList.remove("hidden");
+  setTimeout(()=>$("roadMasterPassword").focus(),50);
+  return;
+ }
  const button=$("createTestAccountsButton"),status=$("testAccountsStatus");
  if(!confirm("۱۰ حساب آزمایشی جدید ساخته شوند؟ حساب‌های قبلی و واقعی دست‌نخورده می‌مانند."))return;
  button.disabled=true;status.textContent="در حال ساخت ۱۰ حساب آزمایشی...";
  try{
-  const result=await api("/admin/test-accounts/create",{},{"X-Builder-Token":builderToken});
+  const result=await api("/admin/test-accounts/create",{}, {"X-Builder-Token":builderToken});
   status.textContent=(result.created_count||0)+" حساب آزمایشی ساخته شد. سرور: "+(result.server_id||"");
   alert("۱۰ حساب آزمایشی ساخته شدند.");
  }catch(e){status.textContent=e.message;alert(e.message);}
