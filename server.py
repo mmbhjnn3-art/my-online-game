@@ -7,6 +7,7 @@ import hmac
 import time
 import asyncio
 import math
+import random
 import unicodedata
 from pathlib import Path
 
@@ -1360,17 +1361,22 @@ def create_test_accounts(
     authorization: str | None = Header(default=None),
     x_builder_token: str | None = Header(default=None)
 ):
-    """Create exactly ten clearly marked test accounts and active sessions."""
+    """Create ten persistent, server-local test accounts for the creator's selected city."""
     created = []
     now = int(time.time())
     with connect() as db:
         creator = require_builder(db, authorization, x_builder_token)
         sid = str(creator["session_server"])
-        for _ in range(10):
-            # Global unique names; never reuse or modify a real player's account.
-            for attempt in range(20):
-                suffix = secrets.token_hex(4).upper()
-                name = f"TEST-{suffix}"
+        existing_count = int(db.execute(
+            "SELECT COUNT(*) AS n FROM players WHERE is_test=TRUE AND server_id=?",
+            (sid,)
+        ).fetchone()["n"])
+        if existing_count >= 20:
+            raise HTTPException(409, f"شهر {SERVER_NAMES.get(sid, sid)} از قبل ۲۰ حساب آزمایشی دارد.")
+        create_count = min(10, 20 - existing_count)
+        for _ in range(create_count):
+            for attempt in range(30):
+                name = "TEST-" + secrets.token_hex(4).upper()
                 key = norm_name(name)
                 if not db.execute("SELECT 1 FROM players WHERE name_key=?", (key,)).fetchone():
                     break
@@ -1379,6 +1385,9 @@ def create_test_accounts(
             salt = secrets.token_bytes(16)
             password = secrets.token_urlsafe(18)
             state = new_state(name, 20)
+            # پخش اولیه در اطراف مرکز شهر تا کاراکترها روی هم قرار نگیرند.
+            state["playerX"] = random.uniform(-180, 180)
+            state["playerY"] = random.uniform(-180, 180)
             cur = db.execute(
                 """INSERT INTO players
                 (server_id,name,name_key,age,password_salt,password_hash,state_json,
@@ -1387,23 +1396,83 @@ def create_test_accounts(
                 (sid, name, key, 20, salt.hex(), password_hash(password, salt),
                  json.dumps(state, ensure_ascii=False), now, now)
             )
-            player_id = cur.fetchone()["id"]
-            token = make_session(db, player_id, sid)
-            created.append({"id": int(player_id), "name": name, "token": token})
-    return {"ok": True, "created_count": len(created), "server_id": sid,
-            "accounts": [{"id": x["id"], "name": x["name"]} for x in created]}
+            player_id = int(cur.fetchone()["id"])
+            make_session(db, player_id, sid)
+            created.append({"id": player_id, "name": name})
+        total_test_count = int(db.execute(
+            "SELECT COUNT(*) AS n FROM players WHERE is_test=TRUE AND server_id=?",
+            (sid,)
+        ).fetchone()["n"])
+    return {"ok": True, "created_count": len(created), "total_test_count": total_test_count,
+            "server_id": sid, "server_name": SERVER_NAMES.get(sid, sid),
+            "accounts": created}
 
 
 @app.post("/api/admin/test-accounts/delete")
-def delete_test_accounts(
+async def delete_test_accounts(
     authorization: str | None = Header(default=None),
     x_builder_token: str | None = Header(default=None)
 ):
-    """Delete only explicitly marked test accounts; real accounts are never targeted."""
+    """Delete only test accounts, their sessions cascade, and remove their city avatars immediately."""
     with connect() as db:
         require_builder(db, authorization, x_builder_token)
-        rows = db.execute("DELETE FROM players WHERE is_test=TRUE RETURNING id").fetchall()
-    return {"ok": True, "deleted_count": len(rows)}
+        rows = db.execute(
+            "DELETE FROM players WHERE is_test=TRUE RETURNING id,name,server_id"
+        ).fetchall()
+    per_server = {}
+    for row in rows:
+        sid = str(row["server_id"])
+        per_server[sid] = per_server.get(sid, 0) + 1
+        await ws_send_group(sid, {"type": "leave", "name": row["name"]})
+    return {"ok": True, "deleted_count": len(rows),
+            "per_server": {SERVER_NAMES.get(k, k): v for k, v in per_server.items()}}
+
+
+async def test_account_simulator_worker():
+    """Keep test accounts in their own city, save their walking positions, and never perform game actions."""
+    while True:
+        try:
+            now = int(time.time())
+            updates = []
+            with connect() as db:
+                rows = db.execute(
+                    """SELECT p.id,p.name,p.state_json,s.token,s.server_id
+                    FROM players p JOIN sessions s ON s.player_id=p.id
+                    WHERE p.is_test=TRUE"""
+                ).fetchall()
+                for row in rows:
+                    try:
+                        state = json.loads(row["state_json"] or "{}")
+                    except (TypeError, ValueError):
+                        state = {}
+                    x = float(state.get("playerX", 0) or 0)
+                    y = float(state.get("playerY", 0) or 0)
+                    # پیاده‌روی آرام و تصادفی؛ هیچ خرید، مصرف آب یا تغییری در موجودی/پول انجام نمی‌شود.
+                    angle = random.random() * math.tau
+                    distance = random.uniform(5.0, 13.0)
+                    x = max(-CITY_LIMIT, min(CITY_LIMIT, x + math.cos(angle) * distance))
+                    y = max(-CITY_LIMIT, min(CITY_LIMIT, y + math.sin(angle) * distance))
+                    state["playerX"], state["playerY"] = x, y
+                    db.execute(
+                        "UPDATE players SET state_json=?,updated_at=? WHERE id=? AND is_test=TRUE",
+                        (json.dumps(state, ensure_ascii=False), now, row["id"])
+                    )
+                    db.execute(
+                        "UPDATE sessions SET last_seen=? WHERE token=?",
+                        (now, row["token"])
+                    )
+                    updates.append((str(row["server_id"]), row["name"], x, y))
+            for sid, name, x, y in updates:
+                await ws_send_group(sid, {
+                    "type": "position",
+                    "player": {"name": name, "playerX": x, "playerY": y, "is_test": True}
+                })
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # خطای موقت دیتابیس نباید اجرای برنامه را متوقف کند.
+            pass
+        await asyncio.sleep(4)
 
 
 @app.get("/api/admin/players")
@@ -2159,17 +2228,19 @@ async def announcement_push_worker():
 @app.on_event("startup")
 async def start_announcement_push_worker():
     app.state.announcement_push_task = asyncio.create_task(announcement_push_worker())
+    app.state.test_account_simulator_task = asyncio.create_task(test_account_simulator_worker())
 
 
 @app.on_event("shutdown")
 async def stop_announcement_push_worker():
-    task = getattr(app.state, "announcement_push_task", None)
-    if task:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+    for task_name in ("announcement_push_task", "test_account_simulator_task"):
+        task = getattr(app.state, task_name, None)
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 @app.get("/sw.js")
