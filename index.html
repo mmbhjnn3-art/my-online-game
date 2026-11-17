@@ -3344,8 +3344,8 @@ async function createTenTestAccounts(afterPassword=false){
  button.disabled=true;status.textContent="در حال ساخت ۱۰ حساب آزمایشی...";
  try{
   const result=await api("/admin/test-accounts/create",{}, {"X-Builder-Token":builderToken});
-  status.textContent=(result.created_count||0)+" حساب آزمایشی ساخته شد. سرور: "+(result.server_id||"");
-  alert("۱۰ حساب آزمایشی ساخته شدند.");
+  status.textContent="شهر "+(result.server_name||result.server_id||"")+" : "+(result.total_test_count||0)+" حساب آزمایشی ثبت‌نام شده";
+  alert((result.created_count||0)+" حساب آزمایشی در شهر "+(result.server_name||result.server_id||"")+" ساخته شد. مجموع این شهر: "+(result.total_test_count||0));
  }catch(e){status.textContent=e.message;alert(e.message);}
  finally{button.disabled=!isCreatorAccount();}
 }
@@ -3356,8 +3356,8 @@ async function deleteAllTestAccounts(){
  button.disabled=true;status.textContent="در حال حذف حساب‌های آزمایشی...";
  try{
   const result=await api("/admin/test-accounts/delete",{},{"X-Builder-Token":builderToken});
-  status.textContent=(result.deleted_count||0)+" حساب آزمایشی حذف شد.";
-  alert((result.deleted_count||0)+" حساب آزمایشی حذف شد. حساب‌های واقعی دست‌نخورده ماندند.");
+  status.textContent=(result.deleted_count||0)+" حساب آزمایشی از همه شهرها حذف شد.";
+  alert((result.deleted_count||0)+" حساب آزمایشی از همه شهرها و دیتابیس حذف شد. حساب‌های واقعی دست‌نخورده ماندند.");
  }catch(e){status.textContent=e.message;alert(e.message);}
  finally{button.disabled=!isCreatorAccount()||!builderToken;}
 }
