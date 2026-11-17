@@ -456,6 +456,11 @@ body.immersive-camera{height:100dvh}
     <div id="builderHint" class="notice">ابزار ساخت فقط برای حساب سازنده بازی فعال است.</div>
     <div id="adminManagementSection" style="margin-top:10px;border-top:1px solid #42685a;padding-top:10px">
      <button id="adminPlayersButton" class="secondary" type="button" disabled>👥 مدیریت بازیکنان</button>
+     <div class="row" style="margin-top:8px">
+      <button id="createTestAccountsButton" class="secondary" type="button" disabled>🧪 ساخت ۱۰ حساب آزمایشی</button>
+      <button id="deleteTestAccountsButton" class="danger" type="button" disabled>🗑️ حذف حساب‌های آزمایشی</button>
+     </div>
+     <div id="testAccountsStatus" class="notice">این ابزار فقط برای سازنده بازی است.</div>
      <div id="adminPlayersPanel" class="hidden" style="margin-top:10px">
       <input id="adminPlayerSearch" type="search" placeholder="جست‌وجوی نام بازیکن..." style="width:100%;box-sizing:border-box;margin-bottom:8px">
       <div id="adminPlayersStatus" class="notice">برای دیدن فهرست بازیکنان، رمز سازنده را وارد کن.</div>
@@ -1788,6 +1793,9 @@ function updateBuilderVisibility(){
  // دکمه جابه‌جایی فقط داخل پنل «ساخت همه» نمایش داده می‌شود.
  if(roadMoveBtn)roadMoveBtn.style.display="none";
  $("adminManagementSection").classList.toggle("hidden",!isCreatorAccount());
+ const testCreateBtn=$("createTestAccountsButton"),testDeleteBtn=$("deleteTestAccountsButton");
+ if(testCreateBtn)testCreateBtn.disabled=!isCreatorAccount()||!builderToken;
+ if(testDeleteBtn)testDeleteBtn.disabled=!isCreatorAccount()||!builderToken;
  $("updateManagementSection").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  $("mapAddMarkerButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  $("busStopToolButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
@@ -3318,6 +3326,32 @@ function showGuideStep(){
  $("guideArrow").textContent="⬇️ این قسمت را ببین";
  guideNext.textContent=step.last?"متوجه شدم":"بعدی";
 }
+async function createTenTestAccounts(){
+ if(!isCreatorAccount()||!builderToken){alert("ابتدا با حساب سازنده وارد شو و رمز ساخت را فعال کن.");return;}
+ const button=$("createTestAccountsButton"),status=$("testAccountsStatus");
+ if(!confirm("۱۰ حساب آزمایشی جدید ساخته شوند؟ حساب‌های قبلی و واقعی دست‌نخورده می‌مانند."))return;
+ button.disabled=true;status.textContent="در حال ساخت ۱۰ حساب آزمایشی...";
+ try{
+  const result=await api("/admin/test-accounts/create",{},{"X-Builder-Token":builderToken});
+  status.textContent=(result.created_count||0)+" حساب آزمایشی ساخته شد. سرور: "+(result.server_id||"");
+  alert("۱۰ حساب آزمایشی ساخته شدند.");
+ }catch(e){status.textContent=e.message;alert(e.message);}
+ finally{button.disabled=!isCreatorAccount()||!builderToken;}
+}
+async function deleteAllTestAccounts(){
+ if(!isCreatorAccount()||!builderToken){alert("ابتدا دسترسی سازنده را فعال کن.");return;}
+ const button=$("deleteTestAccountsButton"),status=$("testAccountsStatus");
+ if(!confirm("تمام حساب‌های آزمایشی و نشست‌های مربوط به آن‌ها حذف شوند؟ حساب‌های واقعی حذف نمی‌شوند."))return;
+ button.disabled=true;status.textContent="در حال حذف حساب‌های آزمایشی...";
+ try{
+  const result=await api("/admin/test-accounts/delete",{},{"X-Builder-Token":builderToken});
+  status.textContent=(result.deleted_count||0)+" حساب آزمایشی حذف شد.";
+  alert((result.deleted_count||0)+" حساب آزمایشی حذف شد. حساب‌های واقعی دست‌نخورده ماندند.");
+ }catch(e){status.textContent=e.message;alert(e.message);}
+ finally{button.disabled=!isCreatorAccount()||!builderToken;}
+}
+$("createTestAccountsButton").addEventListener("click",createTenTestAccounts);
+$("deleteTestAccountsButton").addEventListener("click",deleteAllTestAccounts);
 $("openGuideButton").addEventListener("click",showGuideMenu);
 $("cityGuideButton").addEventListener("click",()=> $("cityGuideShade").classList.remove("hidden"));
 $("startWaterGuideButton").addEventListener("click",()=>startWaterGuide(false));
