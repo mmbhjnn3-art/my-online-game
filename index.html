@@ -271,7 +271,7 @@ body.immersive-camera{height:100dvh}
  var retry=document.getElementById("offlineRetry");
  if(!overlay||!retry)return;
  var endpoint="https://my-online-game-67j9.onrender.com/api/servers";
- var checking=false, timer=null;
+ var checking=false, timer=null, consecutiveFailures=0;
  function show(){overlay.classList.remove("hidden");}
  function hide(){overlay.classList.add("hidden");}
  async function verifyConnection(){
@@ -284,14 +284,13 @@ body.immersive-camera{height:100dvh}
   try{
    var response=await fetch(endpoint,{method:"GET",cache:"no-store",signal:controller.signal});
    if(!response.ok)throw new Error("game server unavailable");
-   // The 3D city depends on this CDN; checking only the API can leave a blank screen.
-   var threeResponse=await fetch("https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js",
-     {method:"HEAD",cache:"no-store",signal:controller.signal});
-   if(!threeResponse.ok)throw new Error("3D library unavailable; VPN may be required");
+   consecutiveFailures=0;
    hide();
   }catch(error){
-   show();
-   retry.textContent="↻ فیلترشکن را وصل کردم؛ ورود مجدد";
+   consecutiveFailures++;
+   // A single slow response must not falsely cover a running game.
+   if(!navigator.onLine || consecutiveFailures>=3)show();
+   retry.textContent="↻ اتصال دوباره";
   }finally{
    clearTimeout(timer);
    checking=false;
@@ -308,7 +307,7 @@ body.immersive-camera{height:100dvh}
  verifyConnection();
  setInterval(function(){
   if(document.visibilityState==="visible")verifyConnection();
- },15000);
+ },30000);
 })();
 </script>
 
@@ -3196,22 +3195,22 @@ function showOfflineScreen(){
 function hideOfflineScreen(){
  if(offlineScreen)offlineScreen.classList.add("hidden");
 }
+let offlineConsecutiveFailures=0;
 async function checkGameConnection(){
  if(offlineCheckBusy)return;
  if(!navigator.onLine){showOfflineScreen();return;}
  offlineCheckBusy=true;
  const controller=new AbortController();
- const timeout=setTimeout(()=>controller.abort(),10000);
+ const timeout=setTimeout(()=>controller.abort(),12000);
  try{
   const response=await fetch(API+"/servers",{method:"GET",cache:"no-store",signal:controller.signal});
   if(!response.ok)throw new Error("server unavailable");
-  // Do not uncover the game if its required 3D engine cannot be downloaded.
-  const threeResponse=await fetch("https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js",
-    {method:"HEAD",cache:"no-store",signal:controller.signal});
-  if(!threeResponse.ok)throw new Error("3D library unavailable");
+  offlineConsecutiveFailures=0;
   hideOfflineScreen();
  }catch(e){
-  showOfflineScreen();
+  offlineConsecutiveFailures++;
+  // Only show the offline page after repeated API failures, not one temporary timeout.
+  if(!navigator.onLine||offlineConsecutiveFailures>=3)showOfflineScreen();
  }finally{
   clearTimeout(timeout);
   offlineCheckBusy=false;
@@ -3238,7 +3237,7 @@ document.addEventListener("visibilitychange",()=>{
 });
 if(!navigator.onLine)showOfflineScreen();
 else checkGameConnection();
-setInterval(checkGameConnection,8000);
+setInterval(checkGameConnection,30000);
 
 
 // راهنمای تعاملی؛ منطق اصلی ثبت‌نام، ورود و سرورها دست‌نخورده می‌ماند.
