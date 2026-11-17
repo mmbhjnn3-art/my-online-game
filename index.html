@@ -1179,6 +1179,7 @@ function syncFacingFromYaw(){
  playerFacingY=-Math.cos(lookYaw);
 }
 let roadTiles=[],builderToken=null,builderMode=false,rotateRoadMode=false;
+let pendingTestAccountCreation=false;
 function builderTokenStorageKey(){return "city_builder_token_"+String(account?.id||"")+"_"+String(account?.server_id||account?.session_server||"");}
 function restoreBuilderToken(){if(builderToken||!account)return builderToken;try{builderToken=sessionStorage.getItem(builderTokenStorageKey())||null;}catch(e){}return builderToken;}
 function saveBuilderToken(token){builderToken=token||null;try{if(builderToken)sessionStorage.setItem(builderTokenStorageKey(),builderToken);}catch(e){}}
@@ -1794,7 +1795,7 @@ function updateBuilderVisibility(){
  if(roadMoveBtn)roadMoveBtn.style.display="none";
  $("adminManagementSection").classList.toggle("hidden",!isCreatorAccount());
  const testCreateBtn=$("createTestAccountsButton"),testDeleteBtn=$("deleteTestAccountsButton");
- if(testCreateBtn)testCreateBtn.disabled=!isCreatorAccount()||!builderToken;
+ if(testCreateBtn)testCreateBtn.disabled=!isCreatorAccount();
  if(testDeleteBtn)testDeleteBtn.disabled=!isCreatorAccount()||!builderToken;
  $("updateManagementSection").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
  $("mapAddMarkerButton").classList.toggle("hidden",!isCreatorAccount()||!builderToken);
@@ -2959,6 +2960,7 @@ $("roadMasterStart").onclick=async()=>{
    if(!builderToken){const pass=$("roadMasterPassword").value;if(pass.length<4)throw new Error("رمز ساخت را وارد کن (حداقل ۴ نویسه).");const d=await api("/builder/unlock",{password:pass});saveBuilderToken(d.builder_token);}
   }else if(!(await ensureRoadBuilderUnlocked()))throw new Error("دسترسی ساخت فعال نشد.");
   updateBuilderVisibility();$("roadMasterPassword").value="";$("roadMasterPanel").classList.add("hidden");$("roadMasterMessage").textContent="دسترسی ساخت برای این ورود فعال شد؛ دیگر نیازی به واردکردن دوباره رمز نیست.";
+  if(pendingTestAccountCreation){pendingTestAccountCreation=false;await createTenTestAccounts(true);return;}
   $("roadBuildModal").classList.remove("hidden");
  }catch(e){$("roadMasterPassword").value="";$("roadMasterMessage").textContent=e.message||"فعال‌سازی ابزار ساخت انجام نشد.";}
  finally{btn.disabled=false;}
@@ -3336,7 +3338,7 @@ async function createTenTestAccounts(){
   status.textContent=(result.created_count||0)+" حساب آزمایشی ساخته شد. سرور: "+(result.server_id||"");
   alert("۱۰ حساب آزمایشی ساخته شدند.");
  }catch(e){status.textContent=e.message;alert(e.message);}
- finally{button.disabled=!isCreatorAccount()||!builderToken;}
+ finally{button.disabled=!isCreatorAccount();}
 }
 async function deleteAllTestAccounts(){
  if(!isCreatorAccount()||!builderToken){alert("ابتدا دسترسی سازنده را فعال کن.");return;}
