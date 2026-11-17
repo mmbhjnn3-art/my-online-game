@@ -126,6 +126,9 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_sessions_server_seen
             ON sessions(server_id, last_seen)
         """)
+        # علامت‌گذاری امن حساب‌های آزمایشی برای حذف گروهی بدون آسیب به حساب‌های واقعی
+        db.execute("ALTER TABLE players ADD COLUMN IF NOT EXISTS is_test BOOLEAN NOT NULL DEFAULT FALSE")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_players_test_accounts ON players(id) WHERE is_test=TRUE")
         db.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS is_visible BOOLEAN NOT NULL DEFAULT TRUE")
         db.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS session_id TEXT")
         db.execute("UPDATE sessions SET session_id=md5(token) WHERE session_id IS NULL")
@@ -1350,6 +1353,57 @@ def unlock_builder(data: BuilderUnlockIn, authorization: str | None = Header(def
             (token, player["id"], server_id, expires)
         )
     return {"ok": True, "builder_token": token, "expires_at": expires, "first_setup": first_setup}
+
+
+@app.post("/api/admin/test-accounts/create")
+def create_test_accounts(
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None)
+):
+    """Create exactly ten clearly marked test accounts and active sessions."""
+    created = []
+    now = int(time.time())
+    with connect() as db:
+        creator = require_builder(db, authorization, x_builder_token)
+        sid = str(creator["session_server"])
+        for _ in range(10):
+            # Global unique names; never reuse or modify a real player's account.
+            for attempt in range(20):
+                suffix = secrets.token_hex(4).upper()
+                name = f"TEST-{suffix}"
+                key = norm_name(name)
+                if not db.execute("SELECT 1 FROM players WHERE name_key=?", (key,)).fetchone():
+                    break
+            else:
+                raise HTTPException(500, "ساخت نام آزمایشی یکتا ممکن نشد.")
+            salt = secrets.token_bytes(16)
+            password = secrets.token_urlsafe(18)
+            state = new_state(name, 20)
+            cur = db.execute(
+                """INSERT INTO players
+                (server_id,name,name_key,age,password_salt,password_hash,state_json,
+                 created_at,updated_at,is_test)
+                VALUES(?,?,?,?,?,?,?,?,?,TRUE) RETURNING id""",
+                (sid, name, key, 20, salt.hex(), password_hash(password, salt),
+                 json.dumps(state, ensure_ascii=False), now, now)
+            )
+            player_id = cur.fetchone()["id"]
+            token = make_session(db, player_id, sid)
+            created.append({"id": int(player_id), "name": name, "token": token})
+    return {"ok": True, "created_count": len(created), "server_id": sid,
+            "accounts": [{"id": x["id"], "name": x["name"]} for x in created]}
+
+
+@app.post("/api/admin/test-accounts/delete")
+def delete_test_accounts(
+    authorization: str | None = Header(default=None),
+    x_builder_token: str | None = Header(default=None)
+):
+    """Delete only explicitly marked test accounts; real accounts are never targeted."""
+    with connect() as db:
+        require_builder(db, authorization, x_builder_token)
+        rows = db.execute("DELETE FROM players WHERE is_test=TRUE RETURNING id").fetchall()
+    return {"ok": True, "deleted_count": len(rows)}
 
 
 @app.get("/api/admin/players")
