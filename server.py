@@ -1472,7 +1472,7 @@ async def test_account_simulator_worker():
         except Exception:
             # خطای موقت دیتابیس نباید اجرای برنامه را متوقف کند.
             pass
-        await asyncio.sleep(4)
+        await asyncio.sleep(1)
 
 
 @app.get("/api/admin/players")
@@ -2385,17 +2385,23 @@ async def ws_send_all(message):
 
 
 async def ws_send_group(server_id, message, exclude=None):
-    """ارسال پیام فقط به بازیکنان همان سرور."""
-    dead = []
-    for client in list(ws_clients.get(server_id, set())):
-        if client is exclude:
-            continue
+    """ارسال هم‌زمان رویداد به همه بازیکنان همان سرور؛ اتصال کند، بقیه را معطل نمی‌کند."""
+    clients = [client for client in list(ws_clients.get(server_id, set())) if client is not exclude]
+    if not clients:
+        return
+
+    async def send_one(client):
         try:
-            await asyncio.wait_for(client.send_json(message), timeout=2.0)
+            await asyncio.wait_for(client.send_json(message), timeout=1.5)
+            return None
         except Exception:
-            dead.append(client)
-    for client in dead:
-        ws_clients.get(server_id, set()).discard(client)
+            return client
+
+    results = await asyncio.gather(*(send_one(client) for client in clients), return_exceptions=True)
+    group = ws_clients.get(server_id, set())
+    for result in results:
+        if result is not None and not isinstance(result, BaseException):
+            group.discard(result)
 
 
 @app.websocket("/ws")
